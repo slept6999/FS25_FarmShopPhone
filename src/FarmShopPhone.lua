@@ -1299,13 +1299,6 @@ function FarmShopPhone:openShop()
     self.lastRestoreConflict = false
     self:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_OPENING)
 
-    -- Телефонный звонок: выбор продавца и открытие его магазина по кнопке «Позвонить».
-    -- Плата списывается сразу при нажатии «Позвонить», до попытки открытия каталога.
-    local feeOk, feeCharged, feeReason = pcall(FarmShopPhone.chargeCallFee, FarmShopPhone)
-    if not feeOk or feeCharged == false then
-        print("[FarmShopPhone][Order] Плата за звонок не списана: " .. tostring(feeOk and feeReason or feeCharged))
-    end
-
     -- Если предыдущий заказ ещё не завершён, сначала возвращаем места спавна.
     if self:isSpawnOverrideActive() then
         self:restoreSpawnPlaces()
@@ -1385,8 +1378,7 @@ function FarmShopPhone:openShop()
             tostring(store.name), tostring(store.kind), tostring(store.openMode),
             store.placeable ~= nil and "yes" or "no", store.triggerObject ~= nil and "yes" or "no",
             moved, tostring(moved > 1.0)))
-        -- Звонок не удался: возвращаем плату за вызов, чтобы игрок не платил за неработающую точку.
-        self:refundCallFee()
+        -- Плата за звонок НЕ списывается: точку открыть не удалось («трубку не сняли»).
         self:notifyOrderResult("delivery", getText("FSP_STORE_OPEN_FAILED"))
         self:abortOrder("shop_interface_unavailable")
         return false
@@ -1396,6 +1388,13 @@ function FarmShopPhone:openShop()
     print(string.format("[FarmShopPhone][UI] Store interface opened: name=%s kind=%s mode=%s placeable=%s playerDistance=%.1f playerTeleported=%s",
         tostring(store.name), tostring(store.kind), tostring(store.openMode),
         store.placeable ~= nil and "yes" or "no", moved, tostring(moved > 1.0)))
+
+    -- Телефонный звонок состоялся: точка открыта успешно — только теперь списываем плату.
+    local feeOk, feeCharged, feeReason = pcall(FarmShopPhone.chargeCallFee, FarmShopPhone)
+    if not feeOk or feeCharged == false then
+        print("[FarmShopPhone][Order] Плата за звонок не списана: " .. tostring(feeOk and feeReason or feeCharged))
+    end
+
     self.catalogOpenedByUs = true
     self.orderActive = true
     if self.fulfillment == "delivery" then
@@ -2968,34 +2967,6 @@ function FarmShopPhone:chargeCallFee()
     return true, "charged"
 end
 
---- Возвращает плату за звонок, если выбранный магазин открыть не удалось.
-function FarmShopPhone:refundCallFee()
-    if not self.callFeeCharged then
-        return
-    end
-
-    local farmId = nil
-    if g_currentMission ~= nil and g_currentMission.getFarmId ~= nil then
-        farmId = g_currentMission:getFarmId()
-    end
-    local fee = FarmShopPhone.CALL_FEE
-
-    if g_currentMission == nil or farmId == nil then
-        self.callFeeCharged = false
-        return
-    end
-
-    local okRefund, err = self:withChargeVerification(farmId, fee, function()
-        g_currentMission:addMoney(fee, farmId, MoneyType.OTHER)
-    end, nil)
-    if not okRefund then
-        print("[FarmShopPhone][Order] WARNING: возврат платы за звонок не выполнен: " .. tostring(err))
-        return
-    end
-
-    self.callFeeCharged = false
-    print("[FarmShopPhone][Order] Плата за звонок возвращена: " .. fee)
-end
 
 --- Отложенный возврат мест спавна после появления объектов.
 -- Не выполняется, пока каталог магазина открыт: игрок может докупить паллеты.
