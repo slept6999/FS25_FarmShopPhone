@@ -6,29 +6,55 @@
 -- доставку и получать покупку в выбранном месте.
 --
 -- Архитектура:
---   1. discoverStores()   — сканирует mapHotspots карты и составляет список
---      точек с типом SHOP (магазины), исключая точки приёма сыпучих товаров
---      (spec_sellingStation). Список перестраивается при загрузке карты и
---      при каждом открытии телефона — поэтому работает на разных картах
---      без ручной настройки.
---   2. drawPhone()        — отрисовывает оверлей со списком точек, режимом
---      получения (самовывоз или доставка к игроку).
+--   1. discoverStores()   — многоступенчатое обнаружение торговых точек:
+--      placeableSystem.placeables, mapHotspots типа SHOP, ShopTrigger и
+--      резервный storeSpawnPlaces. Дедупликация по ссылке на объект, а не по
+--      названию/координатам. Точки приёма сыпучих товаров, животные и собственные
+--      мастерские отфильтровываются по специализациям.
+--   2. drawPhone()        — отрисовывает оверлей со списком поставщиков, способом
+--      получения и кнопкой вызова; состояния normal/hover/pressed/selected/
+--      disabled/focused.
 --   3. openShop()         — открывает штатный интерфейс выбранной точки
 --      (VehicleShopDialog, паллетный магазин, WorkshopScreen) либо стандартный
 --      ShopMenu для торговых точек-триггеров (ShopTrigger).
---   4. Доставка            — по образцу Store Deliveries: первая запись
---      storeSpawnPlaces временно переносится в точку доставки; плата 2.5%
---      начисляется через FarmStats.changeFinanceStats и списывается при
---      закрытии каталога.
+--   4. Машина состояний заказа (ORDER_STATE): переходы только по подтверждённым
+--      событиям; факт покупки фиксируется реальным списанием через
+--      FarmStats.changeFinanceStats, а не закрытием каталога.
+--   5. Доставка            — по образцу Store Deliveries: места спавна временно
+--      переносятся в безопасную точку рядом с игроком (централизованный
+--      beginSpawnOverride/apply/restore), плата 2.5% списывается при закрытии
+--      каталога. Паллеты размещаются линией без наложения.
 --
 -- Ограничения: каталог остаётся общим (не фильтруется по выбранной точке);
--- доставка экспериментальная (без проверки столкновений); только однопользовательский режим.
+-- размещение подтверждается списанием и валидацией места, а не прямым наблюдением
+-- созданного объекта; только однопользовательский режим.
 -------------------------------------------------------------------------------
 
 FarmShopPhone = {}
 
 
--- Переменные для отслеживания покупки и доставки
+-- Машина состояний заказа (ТЗ §5). Переходы только по подтверждённым событиям.
+FarmShopPhone.ORDER_STATE = {
+    IDLE                = "IDLE",
+    SHOP_SELECTED       = "SHOP_SELECTED",
+    FULFILLMENT_SELECTED= "FULFILLMENT_SELECTED",
+    SHOP_OPENING        = "SHOP_OPENING",
+    SHOP_OPEN           = "SHOP_OPEN",
+    PURCHASE_PENDING    = "PURCHASE_PENDING",
+    PURCHASE_CONFIRMED  = "PURCHASE_CONFIRMED",
+    DELIVERY_PENDING    = "DELIVERY_PENDING",
+    DELIVERY_COMPLETED  = "DELIVERY_COMPLETED",
+    DELIVERY_FAILED     = "DELIVERY_FAILED",
+    CANCELLED           = "CANCELLED",
+    COMPLETED           = "COMPLETED"
+}
+FarmShopPhone.orderState = FarmShopPhone.ORDER_STATE.IDLE
+-- Уникальный идентификатор операции: защищает от повторной обработки события покупки.
+FarmShopPhone.orderToken = 0
+-- Подпись последнего обработанного списания (защита от двойной обработки события).
+FarmShopPhone.lastPurchaseSignature = nil
+
+-- Признаки покупки и доставки (единый источник истины — только здесь).
 FarmShopPhone.purchaseConfirmed = false
 FarmShopPhone.pendingDelivery = false
 FarmShopPhone.lastKnownFinanceStats = nil
@@ -37,16 +63,19 @@ FarmShopPhone.deliveryTotalCharges = 0
 FarmShopPhone.deliveryFarmId = nil
 FarmShopPhone.deliveryRate = 0.025
 FarmShopPhone.deliveryMaxCharge = 5000
+FarmShopPhone.financeHookInstalled = false
 
--- Константы для проверки безопасности доставки
+-- Константы для проверки безопасности доставки (все пороги — в одном месте).
 FarmShopPhone.DELIVERY_SAFETY = {
-    defaultSize = { width = 2.5, height = 1.0, length = 3.0 },
-    maxHeightDiff = 0.5,
+    debug = false,
+    defaultSize = { width = 2.5, length = 3.0, height = 2.0 },
+    radii = { 0, 3, 6, 10, 15, 20 },
+    directions = 12,
     maxSlopeDeg = 8.0,
-    maxScoreDistance = 20.0,
-    radii = { 3, 5, 8 },
-    directions = 8,
-    minPlayerClearance = 3.0,
+    preferredSlopeDeg = 3.0,
+    maxHeightDiff = 0.8,
+    minPlayerClearance = 2.0,
+    maxScoreDistance = 20.0
 }
 
 
@@ -140,22 +169,8 @@ end
 -- Ручной выбор точки на карте не поддерживается.
 FarmShopPhone.callPosition = nil
 
--- Проверка безопасности места доставки (все пороги — в одном месте).
-FarmShopPhone.DELIVERY_SAFETY = {
-    debug = false,
-    defaultSize = { width = 2.5, length = 3.0, height = 2.0 },
-    radii = { 0, 3, 6, 10, 15, 20 },
-    directions = 12,
-    maxSlopeDeg = 8.0,
-    preferredSlopeDeg = 3.0,
-    maxHeightDiff = 0.8,
-    minPlayerClearance = 2.0,
-    maxScoreDistance = 20.0
-}
-
 -- Выбранное автоматически безопасное место доставки.
 FarmShopPhone.deliveryTarget = nil
-FarmShopPhone.deliveryValidationFailed = false
 
 -- Флаг того, что каталог магазина открыт и заказ ожидает завершения.
 FarmShopPhone.orderActive = false
@@ -163,6 +178,11 @@ FarmShopPhone.shopWasVisible = false
 
 -- История нажатий клавиш для определения одиночных нажатий ( edge detection ).
 FarmShopPhone.keyStates = {}
+
+-- Состояния интерактивных элементов (ТЗ §3, §4).
+FarmShopPhone.focusIndex = 0     -- индекс элемента в фокусе (0 — фокуса нет)
+FarmShopPhone.hoverId = nil      -- элемент под курсором
+FarmShopPhone.pressedId = nil    -- элемент, который сейчас нажат мышью
 
 -- Состояние блокировки ввода игрока, пока открыт телефон.
 FarmShopPhone.lockedInput = nil
@@ -173,12 +193,8 @@ FarmShopPhone.shopTriggers = {}
 
 -- Доставка: исходное место спавна покупок и плата за доставку.
 FarmShopPhone.originalSpawnPlace = nil
+FarmShopPhone.appliedSpawnSnapshot = nil   -- значения, которые мод выставил (для проверки конфликтов)
 FarmShopPhone.deliveryApplied = false
-FarmShopPhone.deliveryRate = 0.025
-FarmShopPhone.deliveryMaxCharge = 5000
-FarmShopPhone.deliveryTotalCharges = 0
-FarmShopPhone.deliveryFarmId = nil
-FarmShopPhone.financeHookInstalled = false
 
 -- Места спавна паллет станции (подмена для паллетных магазинов).
 FarmShopPhone.palletSpawnBackup = nil
@@ -270,26 +286,6 @@ function FarmShopPhone:unlockPlayerInput()
     end
 end
 
---- Проверяет, является ли объект точкой приёма сыпучих товаров (элеватор, силос и т.п.).
--- Такие точки исключаются из списка магазинов, потому что они продают сыпучее,
--- а не штучные товары (палеты, ящики, техника).
--- @param placeable объект места (placeable) у горячей точки карты
--- @return true, если у объекта есть специализация spec_sellingStation
-local function hasSellingStation(placeable)
-    if placeable == nil then
-        return false
-    end
-
-    -- Прямая специализация на самом месте.
-    if placeable.spec_sellingStation ~= nil then
-        return true
-    end
-
-    -- В некоторых иерархиях объекта специализация лежит во вложенном placeable.
-    local innerPlaceable = placeable.placeable
-    return innerPlaceable ~= nil and innerPlaceable.spec_sellingStation ~= nil
-end
-
 -------------------------------------------------------------------------------
 -- Жизненный цикл мода (события addModEventListener)
 -------------------------------------------------------------------------------
@@ -360,6 +356,7 @@ function FarmShopPhone:loadMap()
     self:loadUiAssets()
     self:installFinanceHook()
     self:discoverStores()
+    FarmShopPhone.orderState = FarmShopPhone.ORDER_STATE.IDLE
     print("[FarmShopPhone] Loaded. Press O to open the phone.")
 end
 
@@ -377,9 +374,9 @@ function FarmShopPhone:deleteMap()
 
     -- Возвращаем места спавна и списываем накопленную плату за доставку
     self.palletRestoreTimer = 0
-    self:restoreSpawnPlaceToOriginal()
-    self:restorePalletSpawnPlaces()
+    self:restoreSpawnPlaces()
     self:chargeDeliveryFee()
+    self:resetOrderContext()
 
     -- Разблокируем движение при выгрузке карты
     if g_localPlayer ~= nil then
@@ -390,10 +387,6 @@ function FarmShopPhone:deleteMap()
     self:unlockPlayerInput()
 end
 
---- Добавляет горячую точку в список магазинов, если она ещё не есть.
--- @param hotspot горячая точка карты
--- @param seen таблица уже добавленных имён
--- @param target целевой список self.stores
 --- Определяет тип магазина штучных товаров по специализациям объекта.
 -- Возвращает "vehicleBuying" (техника), "palletBuying" (паллеты/ящики),
 -- "vehicleSelling" (дилерская мастерская) или nil, если точка не подходит.
@@ -404,12 +397,12 @@ local function getRetailStoreKind(placeable)
         return nil
     end
 
-    -- Магазины техники
+    -- Магазины техники (vehicleBuyingStation)
     if placeable.spec_vehicleBuyingStation ~= nil then
         return "vehicleBuying"
     end
 
-    -- Паллетные магазины (строймаргазины, товары в ящиках/на паллетах)
+    -- Паллетные магазины (palletBuyingStation) - строймаргазины, товары в ящиках/на паллетах
     if placeable.spec_palletBuyingStation ~= nil then
         return "palletBuying"
     end
@@ -424,9 +417,14 @@ local function getRetailStoreKind(placeable)
         return nil
     end
 
-    -- Дилерская мастерская техники (ownWorkshop = false)
+    -- Дилерская мастерская техники (workshop с sellingPoint, ownWorkshop = false)
     local workshop = placeable.spec_workshop
     if workshop ~= nil and workshop.sellingPoint ~= nil and workshop.sellingPoint.ownWorkshop == false then
+        return "vehicleSelling"
+    end
+
+    -- Дополнительная проверка: placeable с spec_vehicleSellingPoint (если есть)
+    if placeable.spec_vehicleSellingPoint ~= nil then
         return "vehicleSelling"
     end
 
@@ -448,29 +446,48 @@ local function callMethodSafe(object, methodName)
     return true
 end
 
---- Добавляет горячую точку (mapHotspot) в список магазинов, если она ещё не добавлена.
--- Используется только как дополнительный источник координат/названия.
-local function addHotspotStore(self, hotspot, seen, kind)
-    local name = hotspot.name
-    if hotspot.getName ~= nil then
-        name = hotspot:getName()
+--- Устойчивый идентификатор торговой точки.
+-- Приоритет: ссылка на placeable -> ссылка на хотспот -> узел триггера -> координаты.
+-- Не используется только название или только координаты (ТЗ §1).
+local function storeKey(store)
+    if store.placeable ~= nil then
+        return "p:" .. tostring(store.placeable)
     end
-    if name == nil or name == "" then
-        name = getText("FSP_STORE_UNKNOWN")
+    if store.hotspot ~= nil then
+        return "h:" .. tostring(store.hotspot)
     end
-    if not seen[name] then
-        seen[name] = true
-        local pos = getPlaceablePosition(hotspot.placeable)
-        table.insert(self.stores, {
-            name = name,
-            kind = kind,
-            hotspot = hotspot,
-            placeable = hotspot.placeable,
-            posX = pos and pos.x or 0,
-            posY = pos and pos.y or 0,
-            posZ = pos and pos.z or 0
-        })
+    if store.triggerNode ~= nil then
+        return "t:" .. tostring(store.triggerNode)
     end
+    return string.format("c:%.2f %.2f %.2f", store.posX or 0, store.posY or 0, store.posZ or 0)
+end
+
+--- Добавляет запись магазина, если она ещё не встречалась (дедупликация по источнику-объекту).
+-- @param source строка-источник обнаружения для журнала ("placeable", "hotspot", "trigger", "spawn")
+local function addDiscoveredStore(self, entry, source, seenKeys, seenNames)
+    local key = storeKey(entry)
+    if seenKeys[key] then
+        print(string.format("[FarmShopPhone][ShopDiscovery] Duplicate skipped (%s): %s",
+            source, entry.name))
+        return false
+    end
+
+    -- Резервная защита от дублей по названию, только когда ссылка на объект недоступна.
+    if entry.placeable == nil and entry.hotspot == nil and seenNames[entry.name] then
+        print(string.format("[FarmShopPhone][ShopDiscovery] Duplicate name skipped (%s): %s",
+            source, entry.name))
+        return false
+    end
+
+    seenKeys[key] = true
+    seenNames[entry.name] = true
+    entry.canOpenInterface = true
+    entry.pickupAvailable = true
+    entry.deliveryAvailable = true
+    table.insert(self.stores, entry)
+    print(string.format("[FarmShopPhone][ShopDiscovery] Store discovered (%s): %s [%s]",
+        source, entry.name, entry.kind or "standard"))
+    return true
 end
 
 --- Возвращает мировую позицию placeable объекта.
@@ -485,131 +502,151 @@ local function getPlaceablePosition(placeable)
     if node == nil then
         return nil
     end
-    local x, y, z = getWorldTranslation(node)
+
+    local ok, x, y, z = pcall(getWorldTranslation, node)
+    if not ok or x == nil then
+        return nil
+    end
     return {x = x, y = y, z = z}
 end
 
---- Добавляет placeable объект в список магазинов.
-local function addPlaceableStore(self, placeable, seen, kind)
-    local name = placeable:getName() or placeable.name or getText("FSP_STORE_UNKNOWN")
+--- Название хотспота карты (с учётом возможных API).
+local function getHotspotName(hotspot)
+    local name = hotspot.name
+    if (name == nil or name == "") and hotspot.getName ~= nil then
+        local ok, value = pcall(hotspot.getName, hotspot)
+        if ok then
+            name = value
+        end
+    end
     if name == nil or name == "" then
         name = getText("FSP_STORE_UNKNOWN")
     end
-    if not seen[name] then
-        seen[name] = true
-        local pos = getPlaceablePosition(placeable)
-        table.insert(self.stores, {
-            name = name,
-            kind = kind,
-            hotspot = nil,
-            placeable = placeable,
-            posX = pos and pos.x or 0,
-            posY = pos and pos.y or 0,
-            posZ = pos and pos.z or 0
-        })
-    end
-end
-
---- Добавляет стандартную торговую точку-триггер (ShopTrigger) в список.
-local function addShopTriggerStore(self, trigger, seen)
-    local node = trigger.shopPlayerSpawn
-    if node == nil then
-        return
-    end
-
-    local x, y, z = getWorldTranslation(node)
-    local name = string.format("%s %d", getText("FSP_STANDARD_STORE"), #self.stores + 1)
-
-    if not seen[name] then
-        seen[name] = true
-        table.insert(self.stores, {
-            name = name,
-            kind = "standard",
-            hotspot = nil,
-            placeable = nil,
-            posX = x,
-            posY = y,
-            posZ = z
-        })
-    end
+    return name
 end
 
 --- Сканирует карту и собирает список торговых точек.
--- В список попадают только горячие точки с типом PlaceableHotspot.TYPE.SHOP
--- у которых нет специализации spec_sellingStation (то есть это магазины
--- штучных товаров, а не точки приёма зерна/корма и т.п.).
--- Список пересобирается при каждом вызове, поэтому автоматически подстраивается
--- под загруженную карту. Если тип SHOP не сработал, пробует fallback по названиям.
+-- Источники (в порядке приоритета):
+--   1. placeableSystem.placeables — реальные объекты карты с торгующими специализациями;
+--   2. mapHotspots типа SHOP      — уточнение названия/координат, без дублей;
+--   3. ShopTrigger               — стандартные торговые точки-триггеры;
+--   4. storeSpawnPlaces          — резерв, только если не найдено ничего другого.
+-- Список пересобирается при каждом вызове, поэтому подстраивается под любую карту
+-- без жёстко заданных имён и координат. Точки приёма сыпучих товаров, животные
+-- и собственные мастерские отфильтровываются по специализациям (ТЗ §1).
 function FarmShopPhone:discoverStores()
     self.stores = {}
 
     local mission = g_currentMission
     if mission == nil then
-        print("[FarmShopPhone] Store discovery unavailable: g_currentMission is nil.")
+        print("[FarmShopPhone][ShopDiscovery] Store discovery unavailable: g_currentMission is nil.")
         return
     end
 
-    local seen = {}
+    local seenKeys, seenNames = {}, {}
 
-    -- Стратегия 1: placeable-объекты — магазины штучных товаров (основной источник).
-    -- Тип точки определяется по специализациям GIANTS (техника, паллеты, дилерская мастерская).
+    -- Источник 1: установленные объекты карты.
     if mission.placeableSystem ~= nil and mission.placeableSystem.placeables ~= nil then
         for _, placeable in ipairs(mission.placeableSystem.placeables) do
             if placeable ~= nil then
                 local kind = getRetailStoreKind(placeable)
                 if kind ~= nil then
-                    addPlaceableStore(self, placeable, seen, kind)
+                    local name = "unknown"
+                    if placeable.getName ~= nil then
+                        local ok, value = pcall(placeable.getName, placeable)
+                        if ok then name = value end
+                    end
+                    if name == nil or name == "" then
+                        name = placeable.name or getText("FSP_STORE_UNKNOWN")
+                    end
+                    local pos = getPlaceablePosition(placeable)
+                    addDiscoveredStore(self, {
+                        name = name,
+                        kind = kind,
+                        hotspot = nil,
+                        placeable = placeable,
+                        triggerNode = nil,
+                        posX = pos and pos.x or 0,
+                        posY = pos and pos.y or 0,
+                        posZ = pos and pos.z or 0
+                    }, "placeable", seenKeys, seenNames)
+                else
+                    local name = "unknown"
+                    if placeable.getName ~= nil then
+                        local ok, value = pcall(placeable.getName, placeable)
+                        if ok then name = value end
+                    end
+                    print(string.format("[FarmShopPhone][ShopDiscovery] Skipped placeable (no buying specialisation): %s",
+                        tostring(name)))
                 end
             end
         end
     end
 
-    -- Стратегия 2: mapHotspots типа SHOP (доп. источник координат/названия).
+    -- Источник 2: маркеры карты (mapHotspots). Сам по себе маркер не доказывает
+    -- возможности покупки — проверяем специализации связанного объекта.
     if PlaceableHotspot ~= nil and PlaceableHotspot.TYPE ~= nil and PlaceableHotspot.TYPE.SHOP ~= nil and
             mission.mapHotspots ~= nil then
         for _, hotspot in ipairs(mission.mapHotspots) do
             if hotspot ~= nil and hotspot.placeableType == PlaceableHotspot.TYPE.SHOP then
                 local placeable = hotspot.placeable
                 local kind = getRetailStoreKind(placeable)
-                local alreadyAdded = false
-                if placeable ~= nil then
-                    for _, existing in ipairs(self.stores) do
-                        if existing.placeable == placeable then
-                            alreadyAdded = true
-                            break
-                        end
-                    end
-                end
-                if kind ~= nil and not alreadyAdded then
-                    addHotspotStore(self, hotspot, seen, kind)
+                local name = getHotspotName(hotspot)
+                if kind == nil then
+                    print(string.format("[FarmShopPhone][ShopDiscovery] Skipped hotspot (no buying specialisation): %s",
+                        tostring(name)))
+                else
+                    local pos = getPlaceablePosition(placeable)
+                    addDiscoveredStore(self, {
+                        name = name,
+                        kind = kind,
+                        hotspot = hotspot,
+                        placeable = placeable,
+                        triggerNode = nil,
+                        posX = pos and pos.x or 0,
+                        posY = pos and pos.y or 0,
+                        posZ = pos and pos.z or 0
+                    }, "hotspot", seenKeys, seenNames)
                 end
             end
         end
     end
 
-    -- Стратегия 2a: стандартные торговые точки-триггеры (ShopTrigger).
+    -- Источник 3: стандартные торговые точки-триггеры (ShopTrigger).
     for _, trigger in ipairs(FarmShopPhone.shopTriggers) do
         if trigger ~= nil then
-            addShopTriggerStore(self, trigger, seen)
+            local node = trigger.shopPlayerSpawn or trigger.rootNode
+            local ok, x, y, z = pcall(getWorldTranslation, node)
+            if node ~= nil and ok and x ~= nil then
+                addDiscoveredStore(self, {
+                    name = string.format("%s %d", getText("FSP_STANDARD_STORE"), #self.stores + 1),
+                    kind = "standard",
+                    hotspot = nil,
+                    placeable = nil,
+                    triggerNode = node,
+                    posX = x,
+                    posY = y,
+                    posZ = z
+                }, "trigger", seenKeys, seenNames)
+            else
+                print("[FarmShopPhone][ShopDiscovery] Skipped trigger without a valid spawn node")
+            end
         end
     end
 
-    -- Стратегия 3 (последний fallback): storeSpawnPlaces как точки самовывоза,
-    -- только если не найдено ни одной точки через placeable/mapHotspots.
+    -- Источник 4 (резерв): storeSpawnPlaces, только если не найдено ничего другого.
     if #self.stores == 0 and mission.storeSpawnPlaces ~= nil then
         for i, spawnPlace in ipairs(mission.storeSpawnPlaces) do
-            local name = string.format("%s %d", getText("FSP_STORE_UNKNOWN"), i)
-            if not seen[name] then
-                seen[name] = true
-                table.insert(self.stores, {
-                    name = name,
-                    hotspot = nil,
-                    placeable = nil,
-                    posX = spawnPlace.startX or 0,
-                    posY = spawnPlace.startY or 0,
-                    posZ = spawnPlace.startZ or 0
-                })
-            end
+            addDiscoveredStore(self, {
+                name = string.format("%s %d", getText("FSP_STORE_UNKNOWN"), i),
+                kind = "standard",
+                hotspot = nil,
+                placeable = nil,
+                triggerNode = nil,
+                posX = spawnPlace.startX or 0,
+                posY = spawnPlace.startY or 0,
+                posZ = spawnPlace.startZ or 0
+            }, "spawn", seenKeys, seenNames)
         end
     end
 
@@ -618,20 +655,87 @@ function FarmShopPhone:discoverStores()
     end)
 
     if #self.stores == 0 then
-        print("[FarmShopPhone] No eligible shop points were found on this map.")
+        print("[FarmShopPhone][ShopDiscovery] No eligible shop points were found on this map.")
     else
-        print(string.format("[FarmShopPhone] Discovered %d shop point(s).", #self.stores))
-        for i, store in ipairs(self.stores) do
-            print(string.format("[FarmShopPhone]   %d. %s [%s]", i, store.name, store.kind or "standard"))
-        end
+        print(string.format("[FarmShopPhone][ShopDiscovery] Discovered %d shop point(s).", #self.stores))
     end
 end
+
+
+
+--- Проверяет актуальность списка магазинов и удаляет недоступные (ТЗ §1).
+-- Точка исключается, если объект удалён, выгружен со сцены или потерял ссылку.
+function FarmShopPhone:verifyStoreAvailability()
+    local mission = g_currentMission
+    if mission == nil then
+        return false
+    end
+
+    -- Актуальное множество размещённых объектов карты.
+    local validPlaceables = nil
+    if mission.placeableSystem ~= nil and mission.placeableSystem.placeables ~= nil then
+        validPlaceables = {}
+        for _, placeable in ipairs(mission.placeableSystem.placeables) do
+            if placeable ~= nil then
+                validPlaceables[placeable] = true
+            end
+        end
+    end
+
+    local removed = 0
+    for i = #self.stores, 1, -1 do
+        local store = self.stores[i]
+        local dead = false
+
+        if store.placeable ~= nil then
+            if store.placeable.isDeleted ~= nil and store.placeable.isDeleted then
+                dead = true
+            elseif validPlaceables ~= nil and not validPlaceables[store.placeable] then
+                dead = true
+            end
+        elseif store.hotspot ~= nil then
+            if store.hotspot.isDeleted ~= nil and store.hotspot.isDeleted then
+                dead = true
+            end
+        elseif store.triggerNode ~= nil then
+            if store.triggerNode.isDeleted ~= nil and store.triggerNode.isDeleted then
+                dead = true
+            end
+        end
+
+        if dead then
+            print("[FarmShopPhone][ShopDiscovery] Store became unavailable: " .. store.name)
+            table.remove(self.stores, i)
+            removed = removed + 1
+        end
+    end
+
+    if removed > 0 then
+        print(string.format("[FarmShopPhone][ShopDiscovery] Store list updated: %d removed, %d remaining.",
+            removed, #self.stores))
+        if self.selectedStore > #self.stores then
+            self.selectedStore = math.max(1, #self.stores)
+        end
+        return true
+    end
+
+    return false
+end
+
+
 function FarmShopPhone:openPhone()
     if g_currentMission == nil or g_gui == nil then
         return
     end
 
     if g_guidedTourManager ~= nil and g_guidedTourManager:getIsTourRunning() then
+        return
+    end
+
+    -- Нельзя открывать телефон поверх активного каталога магазина: это отменило бы
+    -- подмену мест спавна и нарушило бы заказ (ТЗ §4, §6).
+    if self.orderActive and g_gui:getIsGuiVisible() then
+        print("[FarmShopPhone][UI] Phone cannot be reopened while the shop catalog is open.")
         return
     end
 
@@ -649,14 +753,23 @@ function FarmShopPhone:openPhone()
 
     -- Каждый раз при открытии телефона сбрасываем способ получения на "Самовывоз".
     self.fulfillment = "pickup"
-    self.callPosition = nil
-    self.deliveryTarget = nil
-    self.deliveryValidationFailed = false
     self.storeScrollOffset = 1
+
+    -- Новый заказ: отменяем следы предыдущей операции и проверяем актуальность списка.
+    if self:isSpawnOverrideActive() then
+        self:restoreSpawnPlaces()
+    end
+    self:resetOrderContext()
 
     self:discoverStores()
     self.selectedStore = math.min(math.max(self.selectedStore, 1), math.max(#self.stores, 1))
     self.phoneOpen = true
+
+    -- Фокус по умолчанию — на главном элементе (кнопка вызова), если магазин выбран.
+    self.focusIndex = 0
+    if #self.stores > 0 then
+        self:focusById("call")
+    end
 
     -- Блокируем движение персонажа при открытом телефоне
     if g_localPlayer ~= nil then
@@ -669,7 +782,8 @@ function FarmShopPhone:openPhone()
     self:lockPlayerInput()
 end
 
---- Закрывает телефон и сбрасывает состояние заказа.
+--- Закрывает телефон (оверлей). Не трогает активный заказ: подмена мест спавна
+-- снимается только при отмене/завершении заказа или выгрузке миссии (ТЗ §6).
 function FarmShopPhone:closePhone()
     self.phoneOpen = false
     -- Разблокируем движение при закрытии телефона
@@ -679,6 +793,76 @@ function FarmShopPhone:closePhone()
     -- Снимаем заморозку персонажа и блокировку ввода
     self:unfreezePlayerPosition()
     self:unlockPlayerInput()
+end
+
+--- Принудительно отменяет текущий заказ: возврат мест спавна, очистка контекста.
+function FarmShopPhone:abortOrder(reason)
+    print("[FarmShopPhone][Order] Order cancelled: " .. tostring(reason))
+    self:restoreSpawnPlaces()
+    self:resetOrderContext()
+    FarmShopPhone.orderState = FarmShopPhone.ORDER_STATE.CANCELLED
+end
+
+--- Устанавливает состояние заказа и журналирует переход (ТЗ §5).
+function FarmShopPhone:setOrderState(state)
+    if FarmShopPhone.orderState == state then
+        return
+    end
+    print(string.format("[FarmShopPhone][Order] State: %s -> %s", FarmShopPhone.orderState, state))
+    FarmShopPhone.orderState = state
+end
+
+-------------------------------------------------------------------------------
+-- Централизованное управление временной подменой мест спавна (ТЗ §6)
+-------------------------------------------------------------------------------
+
+--- Начинает операцию подмены мест спавна. Исходное состояние сохраняется один раз.
+function FarmShopPhone:beginSpawnOverride()
+    self:captureOriginalSpawnPlace()
+    print("[FarmShopPhone][SpawnRestore] Spawn override started.")
+end
+
+--- true, если подмена мест спавна сейчас активна.
+function FarmShopPhone:isSpawnOverrideActive()
+    return self.deliveryApplied or self.palletDeliveryApplied
+end
+
+--- Полный возврат мест спавна. Идемпотентно и безопасно при повторных вызовах.
+function FarmShopPhone:restoreSpawnPlaces()
+    self:restoreSpawnPlaceToOriginal()
+    self:restorePalletSpawnPlaces()
+    if not self:isSpawnOverrideActive() then
+        self.callPosition = nil
+        self.deliveryTarget = nil
+        self.deliverySize = nil
+    end
+end
+
+--- Очищает временный контекст заказа (ссылки, флаги, блокировки).
+-- Не трогает сведения о реально купленном товаре до завершения обработки доставки.
+function FarmShopPhone:resetOrderContext()
+    FarmShopPhone.orderState = FarmShopPhone.ORDER_STATE.IDLE
+    FarmShopPhone.purchaseConfirmed = false
+    FarmShopPhone.pendingDelivery = false
+    FarmShopPhone.lastKnownFinanceStats = nil
+    FarmShopPhone.lastPurchaseSignature = nil
+    FarmShopPhone.deliveryValidationFailed = false
+    self.orderActive = false
+    self.shopWasVisible = false
+    self.callPosition = nil
+    self.deliveryTarget = nil
+    self.deliverySize = nil
+    self.orderStoreName = nil
+end
+
+--- Очищает временное состояние при выгрузке миссии.
+function FarmShopPhone:cleanupDeliveryContext()
+    self:restoreSpawnPlaces()
+    self:resetOrderContext()
+    FarmShopPhone.deliveryTotalCharges = 0
+    FarmShopPhone.deliveryFarmId = nil
+    self.phoneOpen = false
+    print("[FarmShopPhone][SpawnRestore] Delivery context cleaned up on mission unload.")
 end
 
 function FarmShopPhone:captureCallPosition()
@@ -907,7 +1091,13 @@ function FarmShopPhone:prepareDeliveryTarget(store, size)
                 end
             end
         end
+    elseif store ~= nil and (store.kind == "vehicleBuying" or store.kind == "vehicleSelling") and store.placeable ~= nil then
+        -- For vehicle stores, use a larger default size to accommodate vehicles
+        size = { width = 4.0, height = 2.0, length = 6.0 }
     end
+
+    -- Store the delivery size for later use
+    self.deliverySize = size
 
     self.deliveryTarget = self:findSafeDeliveryTarget(size)
 
@@ -956,34 +1146,54 @@ end
 
 function FarmShopPhone:openShop()
     if g_gui == nil then
-        print("[FarmShopPhone] GUI is not available.")
-        return
+        print("[FarmShopPhone][UI] GUI is not available.")
+        return false
     end
 
+    local store = self.stores[self.selectedStore]
+    if store == nil or not store.canOpenInterface then
+        print("[FarmShopPhone][Order] No usable store selected.")
+        self:setOrderState(FarmShopPhone.ORDER_STATE.CANCELLED)
+        return false
+    end
+    self.orderStoreName = store.name
+
+    -- Новая операция: новый токен заказа (защита от повторной обработки события).
+    FarmShopPhone.orderToken = FarmShopPhone.orderToken + 1
+    FarmShopPhone.purchaseConfirmed = false
+    FarmShopPhone.pendingDelivery = false
+    FarmShopPhone.lastKnownFinanceStats = nil
+    FarmShopPhone.lastPurchaseSignature = nil
+    FarmShopPhone.deliveryTotalCharges = 0
+    FarmShopPhone.deliveryFarmId = nil
+    self.shopWasVisible = false
+    self:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_OPENING)
+
     -- Если предыдущий заказ ещё не завершён, сначала возвращаем места спавна.
-    self:restorePalletSpawnPlaces()
+    if self:isSpawnOverrideActive() then
+        self:restoreSpawnPlaces()
+    end
 
     if self.fulfillment == "delivery" then
-        local store = self.stores[self.selectedStore]
-
         -- Этап A: без безопасного места рядом с игроком каталог не открываем.
         if not self:prepareDeliveryTarget(store, FarmShopPhone.DELIVERY_SAFETY.defaultSize) then
-            return
+            self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_FAILED)
+            return false
         end
 
-        -- Доставка всегда идёт к безопасной точке рядом с игроком.
+        self:beginSpawnOverride()
+
         local target = self.deliveryTarget
         local applied = false
 
         -- Паллетные магазины спавнят товар через собственный PalletSpawner.
-        if store ~= nil and store.kind == "palletBuying" and store.placeable ~= nil then
+        if store.kind == "palletBuying" and store.placeable ~= nil then
             local ok, result = pcall(function()
                 return self:applyPalletSpawnPlaces(store.placeable, target)
             end)
             if not ok then
-                print("[FarmShopPhone] Pallet spawn patch failed: " .. tostring(result))
+                print("[FarmShopPhone][Delivery] Pallet spawn patch failed: " .. tostring(result))
                 self:restorePalletSpawnPlaces()
-                applied = false
             else
                 applied = result
             end
@@ -994,40 +1204,62 @@ function FarmShopPhone:openShop()
                 return self:applyDeliverySpawnPlace(target)
             end)
             if not ok then
-                print("[FarmShopPhone] Store spawn patch failed: " .. tostring(result))
+                print("[FarmShopPhone][Delivery] Store spawn patch failed: " .. tostring(result))
                 self:restoreSpawnPlaceToOriginal()
-                applied = false
             else
                 applied = result
             end
         end
+
+        if not applied then
+            self:abortOrder("delivery spawn override failed")
+            return false
+        end
     else
-        self:restoreSpawnPlaceToOriginal()
+        self:restoreSpawnPlaces()
     end
+
+    self:setOrderState(FarmShopPhone.ORDER_STATE.FULFILLMENT_SELECTED)
 
     -- При открытии каталога закрываем телефон, чтобы не блокировать ввод.
     self:closePhone()
 
-    local opened = self:openStoreInterface(self.stores[self.selectedStore])
+    local opened = false
+    local okOpen, resOpen = pcall(function()
+        return self:openStoreInterface(store)
+    end)
+    if okOpen then
+        opened = resOpen
+    else
+        print("[FarmShopPhone][UI] Store interface error: " .. tostring(resOpen))
+    end
 
     if not opened then
         -- Резерв: стандартный каталог игры для точек без собственного интерфейса.
-        -- Устанавливаем выбранный магазин перед открытием
-        if ShopMenu ~= nil and self.stores[self.selectedStore] ~= nil then
-            local store = self.stores[self.selectedStore]
-            -- Пытаемся передать выбранный магазин в ShopMenu
+        if ShopMenu ~= nil then
             if ShopMenu.setCurrentStore ~= nil then
                 ShopMenu.setCurrentStore(store)
             end
         end
-        g_gui:changeScreen(nil, ShopMenu)
+        local okMenu, errMenu = pcall(function()
+            g_gui:changeScreen(nil, ShopMenu)
+        end)
+        if not okMenu then
+            print("[FarmShopPhone][UI] Failed to open shop screen: " .. tostring(errMenu))
+            self:abortOrder("shop interface open failed")
+            return false
+        end
     end
 
     self.orderActive = true
-    self.shopWasVisible = false
+    self:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_OPEN)
+    return true
 end
 
 function FarmShopPhone:handleKey(keyCode, callback)
+    if keyCode == nil then
+        return
+    end
     local pressed = Input.isKeyPressed(keyCode)
     local key = tostring(keyCode)
     local wasPressed = self.keyStates[key]
@@ -1037,68 +1269,209 @@ function FarmShopPhone:handleKey(keyCode, callback)
     end
 end
 
+-------------------------------------------------------------------------------
+-- Реестр интерактивных элементов и навигация (ТЗ §3, §4)
+-------------------------------------------------------------------------------
+
+--- Возвращает упорядоченный список интерактивных элементов текущего экрана.
+-- Каждый элемент: { id, rect = {x,y,w,h}, enabled, action(self) }.
+function FarmShopPhone:getInteractiveElements()
+    local ui = FarmShopPhone.UI
+    local elements = {}
+    local hasStore = #self.stores > 0
+
+    local firstIndex = self.storeScrollOffset
+    local lastIndex = math.min(#self.stores, firstIndex + ui.rows - 1)
+    for i = firstIndex, lastIndex do
+        local rowY = ui.listTop - (i - firstIndex + 1) * ui.rowH
+        table.insert(elements, {
+            id = "store_" .. i,
+            rect = {ui.listX, rowY, ui.listContentW, ui.rowH - 0.003},
+            enabled = true,
+            action = function(self)
+                self.selectedStore = i
+                self:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_SELECTED)
+            end
+        })
+    end
+
+    table.insert(elements, {
+        id = "pickup",
+        rect = {ui.cardX, ui.fulfillmentY, ui.cardW, ui.cardH},
+        enabled = hasStore,
+        action = function(self)
+            self.fulfillment = "pickup"
+            self:setOrderState(FarmShopPhone.ORDER_STATE.FULFILLMENT_SELECTED)
+        end
+    })
+
+    table.insert(elements, {
+        id = "delivery",
+        rect = {ui.deliveryX, ui.fulfillmentY, ui.cardW, ui.cardH},
+        enabled = hasStore,
+        action = function(self)
+            self.fulfillment = "delivery"
+            self:setOrderState(FarmShopPhone.ORDER_STATE.FULFILLMENT_SELECTED)
+            self:prepareDeliveryTarget(self.stores[self.selectedStore],
+                FarmShopPhone.DELIVERY_SAFETY.defaultSize)
+        end
+    })
+
+    table.insert(elements, {
+        id = "call",
+        rect = {ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH},
+        enabled = hasStore,
+        action = function(self)
+            self:openShop()
+        end
+    })
+
+    return elements
+end
+
+--- Переводит фокус на элемент по id (если он доступен).
+function FarmShopPhone:focusById(id)
+    local elements = self:getInteractiveElements()
+    for index, element in ipairs(elements) do
+        if element.id == id and element.enabled then
+            self.focusIndex = index
+            return true
+        end
+    end
+    return false
+end
+
+--- Активирует элемент в фокусе. Возвращает true, если действие выполнено.
+function FarmShopPhone:activateFocus()
+    local elements = self:getInteractiveElements()
+    local element = elements[self.focusIndex]
+    if element == nil or not element.enabled then
+        return false
+    end
+
+    element.action(self)
+
+    -- После выбора магазина фокус переходит к кнопке вызова, чтобы следующий
+    -- ENTER открывал каталог (одно нажатие — одно действие).
+    if element.id:sub(1, 6) == "store_" then
+        self:focusById("call")
+    end
+    return true
+end
+
+--- Шаг фокуса вперёд/назад только по доступным элементам.
+function FarmShopPhone:stepFocus(delta)
+    local elements = self:getInteractiveElements()
+    if #elements == 0 then
+        self.focusIndex = 0
+        return
+    end
+
+    local index = self.focusIndex
+    for _ = 1, #elements do
+        index = ((index - 1 + delta) % #elements) + 1
+        if elements[index].enabled then
+            self.focusIndex = index
+            return
+        end
+    end
+end
+
+--- Находит элемент под курсором.
+local function elementAt(elements, x, y)
+    for index, element in ipairs(elements) do
+        local r = element.rect
+        if inRect(x, y, r[1], r[2], r[3], r[4]) then
+            return index, element
+        end
+    end
+    return nil, nil
+end
+
 function FarmShopPhone:updatePhoneInput()
     if not self.phoneOpen or g_gui == nil then
         return
     end
 
-    -- Если открыт каталог магазина (ShopMenu), не обрабатываем ввод телефона.
+    -- Если открыт каталог магазина (ShopMenu), не обрабатываем ввод телефона:
+    -- клавиши оригинального интерфейса не перехватываются (ТЗ §4).
     if self.orderActive and g_gui:getIsGuiVisible() then
         return
     end
 
-    -- Прямая обработка клавиши Esc для закрытия телефона (edge detection)
-    local escPressed = Input.isKeyPressed(Input.KEY_esc)
-    local escKey = tostring(Input.KEY_esc)
-    local escWasPressed = self.keyStates[escKey]
-    self.keyStates[escKey] = escPressed
-    if escPressed and not escWasPressed then
-        self:closePhone()
-    end
-
-    -- Обработка клика мыши по списку торговых точек
+    local ui = FarmShopPhone.UI
     local mouseX = g_inputBinding ~= nil and g_inputBinding.mousePosXLast or nil
     local mouseY = g_inputBinding ~= nil and g_inputBinding.mousePosYLast or nil
-    local ui = FarmShopPhone.UI
-    if #self.stores > 0 and mouseX ~= nil and mouseY ~= nil then
-        local mousePressed = Input.isMouseButtonPressed(Input.MOUSE_BUTTON_LEFT)
-        local mouseKey = "MOUSE_LEFT"
-        local mouseWasPressed = self.keyStates[mouseKey]
-        self.keyStates[mouseKey] = mousePressed
-        if mousePressed and not mouseWasPressed then
-            local firstIndex = self.storeScrollOffset
-            local lastIndex = math.min(#self.stores, firstIndex + ui.rows - 1)
+    local elements = self:getInteractiveElements()
 
-            if mouseX >= ui.listX and mouseX <= ui.listX + ui.listW then
-                for i = firstIndex, lastIndex do
-                    local rowY = ui.listTop - (i - firstIndex + 1) * ui.rowH
-                    if inRect(mouseX, mouseY, ui.listX, rowY, ui.listW, ui.rowH) then
-                        self.selectedStore = i
-                        return
-                    end
-                end
-            end
+    -- Hover: обновляется при перемещении мыши и не вызывает выбор элемента.
+    self.hoverId = nil
+    if mouseX ~= nil and mouseY ~= nil then
+        local _, element = elementAt(elements, mouseX, mouseY)
+        if element ~= nil and element.enabled then
+            self.hoverId = element.id
+        end
+    end
 
-            if inRect(mouseX, mouseY, ui.cardX, ui.fulfillmentY, ui.cardW, ui.cardH) then
-                self.fulfillment = "pickup"
-                return
-            end
+    -- ESC: закрыть телефон (модальных окон у мода нет).
+    self:handleKey(Input.KEY_esc, function(phone)
+        phone:closePhone()
+    end)
 
-            if inRect(mouseX, mouseY, ui.deliveryX, ui.fulfillmentY, ui.cardW, ui.cardH) then
-                self.fulfillment = "delivery"
-                self:prepareDeliveryTarget(self.stores[self.selectedStore],
-                    FarmShopPhone.DELIVERY_SAFETY.defaultSize)
-                return
-            end
+    -- BACKSPACE: вернуться назад — в одноэкранной схеме закрывает телефон.
+    self:handleKey(Input.KEY_backspace, function(phone)
+        phone:closePhone()
+    end)
 
-            if inRect(mouseX, mouseY, ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH) then
-                self:openShop()
-                return
+    -- TAB / SHIFT+TAB: перемещение фокуса по интерактивным элементам.
+    self:handleKey(Input.KEY_tab, function(phone)
+        local shift = false
+        if Input.KEY_lshift ~= nil and Input.isKeyPressed(Input.KEY_lshift) then
+            shift = true
+        end
+        if Input.KEY_rshift ~= nil and Input.isKeyPressed(Input.KEY_rshift) then
+            shift = true
+        end
+        phone:stepFocus(shift and -1 or 1)
+    end)
+
+    -- ENTER: активирует только элемент в фокусе.
+    self:handleKey(Input.KEY_return, function(phone)
+        if phone.focusIndex == 0 then
+            phone:focusById("call")
+        end
+        phone:activateFocus()
+    end)
+
+    -- Мышь: отслеживаем нажатие для визуального состояния pressed.
+    local mousePressed = Input.isMouseButtonPressed(Input.MOUSE_BUTTON_LEFT)
+    local mouseWasPressed = self.keyStates["MOUSE_LEFT"]
+    self.keyStates["MOUSE_LEFT"] = mousePressed
+
+    if mousePressed and mouseX ~= nil and mouseY ~= nil then
+        local index, element = elementAt(elements, mouseX, mouseY)
+        if element ~= nil and element.enabled then
+            self.pressedId = element.id
+            self.focusIndex = index
+        else
+            self.pressedId = nil
+        end
+    elseif not mousePressed then
+        self.pressedId = nil
+    end
+
+    -- Левый клик (edge detection): выбор и подтверждение.
+    if mousePressed and not mouseWasPressed and mouseX ~= nil and mouseY ~= nil then
+        local _, element = elementAt(elements, mouseX, mouseY)
+        if element ~= nil and element.enabled then
+            element.action(self)
+            if element.id:sub(1, 6) == "store_" then
+                self:focusById("call")
             end
         end
     end
 
-    -- Прокрутка списка колесом мыши при наведении на строки.
+    -- Колесо мыши: прокрутка списка с реальными границами содержимого.
     local overList = mouseX ~= nil and mouseY ~= nil
             and inRect(mouseX, mouseY, ui.listX,
                 ui.listTop - ui.rows * ui.rowH, ui.listW, ui.rows * ui.rowH)
@@ -1112,38 +1485,48 @@ function FarmShopPhone:updatePhoneInput()
 
     if overList and wheelUp and not upWas then
         self.storeScrollOffset = math.max(1, self.storeScrollOffset - 1)
+        self.focusIndex = 0
     elseif overList and wheelDown and not downWas then
         self.storeScrollOffset = math.min(maxOffset, self.storeScrollOffset + 1)
+        self.focusIndex = 0
     end
 
+    -- Стрелки вверх/вниз: выбор магазина + фокус на выбранной строке.
     self:handleKey(Input.KEY_up, function(phone)
         if #phone.stores > 0 then
             phone.selectedStore = ((phone.selectedStore - 2) % #phone.stores) + 1
             phone:keepSelectionVisible()
+            phone:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_SELECTED)
+            phone:focusById("store_" .. phone.selectedStore)
         end
     end)
     self:handleKey(Input.KEY_down, function(phone)
         if #phone.stores > 0 then
             phone.selectedStore = (phone.selectedStore % #phone.stores) + 1
             phone:keepSelectionVisible()
+            phone:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_SELECTED)
+            phone:focusById("store_" .. phone.selectedStore)
         end
     end)
-    self:handleKey(Input.KEY_return, function(phone)
-        phone:openShop()
-    end)
+
+    -- A/D и стрелки влево/вправо: способ получения.
     self:handleKey(Input.KEY_a, function(phone)
         phone.fulfillment = "pickup"
+        phone:setOrderState(FarmShopPhone.ORDER_STATE.FULFILLMENT_SELECTED)
     end)
     self:handleKey(Input.KEY_d, function(phone)
         phone.fulfillment = "delivery"
+        phone:setOrderState(FarmShopPhone.ORDER_STATE.FULFILLMENT_SELECTED)
         phone:prepareDeliveryTarget(phone.stores[phone.selectedStore],
             FarmShopPhone.DELIVERY_SAFETY.defaultSize)
     end)
     self:handleKey(Input.KEY_left, function(phone)
         phone.fulfillment = "pickup"
+        phone:setOrderState(FarmShopPhone.ORDER_STATE.FULFILLMENT_SELECTED)
     end)
     self:handleKey(Input.KEY_right, function(phone)
         phone.fulfillment = "delivery"
+        phone:setOrderState(FarmShopPhone.ORDER_STATE.FULFILLMENT_SELECTED)
         phone:prepareDeliveryTarget(phone.stores[phone.selectedStore],
             FarmShopPhone.DELIVERY_SAFETY.defaultSize)
     end)
@@ -1192,24 +1575,60 @@ function FarmShopPhone:drawCenteredText(value, x, y, w, h, size, r, g, b, a)
     setTextColor(1, 1, 1, 1)
 end
 
---- Проверяет, безопасно ли доставлять товар в заданной точке.
--- Возвращает true/false и строку ошибки.
---- Показывает уведомление об ошибке доставки
+--- Локализует причину, переданную как ключ FSP_*, либо возвращает текст как есть.
+local function localizeReason(reason)
+    if type(reason) == "string" and reason:sub(1, 4) == "FSP_" then
+        return getText(reason)
+    end
+    return reason or ""
+end
+
+--- Показывает уведомление об ошибке доставки.
 function FarmShopPhone:showDeliveryError(reason)
     if g_currentMission ~= nil and g_currentMission.hud ~= nil then
-        local text = getText("FSP_DELIVERY_UNSAFE") .. " " .. (reason or "")
-        g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_CRITICAL, text, nil, GuiSoundPlayer.SOUND_SAMPLES.ERROR)
+        local text = getText("FSP_DELIVERY_UNSAFE") .. " " .. localizeReason(reason)
+        g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_CRITICAL,
+            text, nil, GuiSoundPlayer.SOUND_SAMPLES.ERROR)
     end
+end
+
+--- Показывает уведомление об успешном выборе/размещении доставки.
+function FarmShopPhone:showDeliverySuccess(key)
+    if g_currentMission ~= nil and g_currentMission.hud ~= nil then
+        local text = getText(key)
+        g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
+            text, nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
+    end
+end
+
+--- Показывает итоговое уведомление заказа (ТЗ §2, экран 5).
+function FarmShopPhone:notifyOrderResult(kind)
+    if g_currentMission == nil or g_currentMission.hud == nil then
+        return
+    end
+
+    local text
+    if kind == "delivery" then
+        text = getText("FSP_DELIVERY_DONE")
+    else
+        text = string.format(getText("FSP_ORDER_PICKUP_DONE"), self.orderStoreName or "")
+    end
+
+    g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
+        text, nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
 end
 
 
 --- Пытается найти безопасное место доставки рядом с заданной точкой.
 -- Возвращает таблицу {x,y,z,rotX,rotY,rotZ,dirX,dirY,dirZ,dirPerpX,dirPerpY,dirPerpZ} или nil
-function FarmShopPhone:findSafeDeliveryLocation(origX, origY, origZ, origRot)
+function FarmShopPhone:findSafeDeliveryLocation(origX, origY, origZ, origRot, size)
     local mission = g_currentMission
     if mission == nil or mission.terrainRootNode == nil then
         return nil
     end
+
+    -- Use the provided size or stored delivery size
+    size = size or self.deliverySize or FarmShopPhone.DELIVERY_SAFETY.defaultSize
 
     local radius = FarmShopPhone.UI.deliveryCheckRadius or 3.0
     local step = 1.0
@@ -1233,7 +1652,7 @@ function FarmShopPhone:findSafeDeliveryLocation(origX, origY, origZ, origRot)
         local z = origZ + offset[2]
         local y = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, x, 0, z)
 
-        local safe, reason = self:isDeliveryLocationSafe(x, y, z)
+        local safe, reason = self:isDeliveryLocationSafe(x, y, z, size)
         if safe then
             return {x, y, z, 0, 0, 0, 0, 0, 1, 1, 0, 0}
         end
@@ -1242,9 +1661,9 @@ function FarmShopPhone:findSafeDeliveryLocation(origX, origY, origZ, origRot)
     return nil
 end
 
-function FarmShopPhone:isDeliveryLocationSafe(x, y, z)
+function FarmShopPhone:isDeliveryLocationSafe(x, y, z, size)
     -- Используем единую систему валидации через validateDeliveryArea
-    local size = FarmShopPhone.DELIVERY_SAFETY.defaultSize
+    size = size or FarmShopPhone.DELIVERY_SAFETY.defaultSize
     local ok, reason, _, _ = self:validateDeliveryArea({x, 0, z}, size)
     if not ok then
         return false, reason or getText("FSP_DELIVERY_UNSAFE_GENERIC")
@@ -1252,12 +1671,8 @@ function FarmShopPhone:isDeliveryLocationSafe(x, y, z)
     return true, nil
 end
 
--- Alias для обратной совместимости (если где-то вызывается напрямую)
-function FarmShopPhone:deliveryCollisionFree(x, y, z, size)
-    -- Делегируем к новой системе валидации
-    local safe, reason = self:isDeliveryLocationSafe(x, y, z)
-    return safe
-end
+-- Примечание: отдельный alias deliveryCollisionFree удалён — он перекрывал
+-- одноимённую проверку через overlapBox и вызывал бесконечную рекурсию.
 
 --- Иконка типа поставщика для строки списка.
 local function storeIconName(kind)
@@ -1267,18 +1682,6 @@ local function storeIconName(kind)
         return "tractor_grey"
     end
     return "store_grey"
-end
-
---- Короткая локализованная категория точки вместо технического ключа.
-local function storeKindLabel(kind)
-    if kind == "palletBuying" then
-        return getText("FSP_UI_KIND_PALLET")
-    elseif kind == "vehicleBuying" or kind == "vehicleSelling" then
-        return getText("FSP_UI_KIND_VEHICLE")
-    elseif kind == "standard" then
-        return getText("FSP_UI_KIND_STANDARD")
-    end
-    return getText("FSP_UI_KIND_OTHER")
 end
 
 function FarmShopPhone:drawPhone()
@@ -1342,12 +1745,28 @@ function FarmShopPhone:drawPhone()
         for i = firstIndex, lastIndex do
             local rowY = y - (i - firstIndex + 1) * ui.rowH
             local selected = i == self.selectedStore
+            local hovered = self.hoverId == "store_" .. i
+            local focused = self.focusIndex == (i - firstIndex + 1)
+
+            -- Состояния элемента: selected, pressed, hover, focused, normal.
+            local r, g, b
+            if selected then
+                r, g, b = 0.17, 0.22, 0.13
+            elseif self.pressedId == "store_" .. i then
+                r, g, b = 0.20, 0.28, 0.12
+            elseif hovered then
+                r, g, b = 0.16, 0.20, 0.22
+            else
+                r, g, b = 0.13, 0.16, 0.17
+            end
+
             -- Прямоугольная подложка без скруглений: не растягиваем спрайт.
-            drawFilledRect(ui.listX, rowY, ui.listContentW, ui.rowH - 0.003,
-                selected and 0.17 or 0.13, selected and 0.22 or 0.16,
-                selected and 0.13 or 0.17, 1)
+            drawFilledRect(ui.listX, rowY, ui.listContentW, ui.rowH - 0.003, r, g, b, 1)
             if selected then
                 drawFilledRect(ui.listX, rowY, 0.004, ui.rowH - 0.003, 0.72, 0.95, 0.29, 1)
+            elseif focused then
+                drawFilledRect(ui.listX + ui.listContentW - 0.004, rowY, 0.004, ui.rowH - 0.003,
+                    0.72, 0.95, 0.29, 1)
             end
 
             local iconName = storeIconName(self.stores[i].kind)
@@ -1358,7 +1777,11 @@ function FarmShopPhone:drawPhone()
             end
             local textX = ui.listX + 0.036
 
-            setTextColor(1, 1, 1, 1)
+            if selected then
+                setTextColor(0.72, 0.95, 0.29, 1)
+            else
+                setTextColor(1, 1, 1, 1)
+            end
             local name = limitUtf8(self.stores[i].name, 28)
             renderText(textX, rowY + 0.021, 0.015, name)
             setTextColor(1, 1, 1, 1)
@@ -1385,20 +1808,39 @@ function FarmShopPhone:drawPhone()
 
     local pickupSelected = self.fulfillment == "pickup"
     local deliverySelected = self.fulfillment == "delivery"
+    local rowsShown = math.max(0, lastIndex - firstIndex + 1)
+    local hasStore = #self.stores > 0
+    local focusPickup = self.focusIndex == rowsShown + 1
+    local focusDelivery = self.focusIndex == rowsShown + 2
+    local focusCall = self.focusIndex == rowsShown + 3
 
     -- Две одинаковые карточки в одну строку с симметричным зазором.
-    drawFilledRect(ui.cardX, ui.fulfillmentY, ui.cardW, ui.cardH,
-        pickupSelected and 0.17 or 0.13, pickupSelected and 0.22 or 0.16,
-        pickupSelected and 0.13 or 0.17, 1)
-    drawFilledRect(ui.deliveryX, ui.fulfillmentY, ui.cardW, ui.cardH,
-        deliverySelected and 0.17 or 0.13, deliverySelected and 0.22 or 0.16,
-        deliverySelected and 0.13 or 0.17, 1)
-    if pickupSelected then
-        drawFilledRect(ui.cardX, ui.fulfillmentY, 0.004, ui.cardH, 0.72, 0.95, 0.29, 1)
+    local function drawCard(x, selected, hovered, pressed, focused, enabled)
+        local r, g, b
+        if not enabled then
+            r, g, b = 0.10, 0.11, 0.12
+        elseif selected then
+            r, g, b = 0.17, 0.22, 0.13
+        elseif pressed then
+            r, g, b = 0.20, 0.28, 0.12
+        elseif hovered then
+            r, g, b = 0.16, 0.20, 0.22
+        else
+            r, g, b = 0.13, 0.16, 0.17
+        end
+        drawFilledRect(x, ui.fulfillmentY, ui.cardW, ui.cardH, r, g, b, 1)
+
+        if selected then
+            drawFilledRect(x, ui.fulfillmentY, 0.004, ui.cardH, 0.72, 0.95, 0.29, 1)
+        elseif focused and enabled then
+            drawFilledRect(x + ui.cardW - 0.004, ui.fulfillmentY, 0.004, ui.cardH, 0.72, 0.95, 0.29, 1)
+        end
     end
-    if deliverySelected then
-        drawFilledRect(ui.deliveryX, ui.fulfillmentY, 0.004, ui.cardH, 0.72, 0.95, 0.29, 1)
-    end
+
+    drawCard(ui.cardX, pickupSelected, self.hoverId == "pickup",
+        self.pressedId == "pickup", focusPickup, hasStore)
+    drawCard(ui.deliveryX, deliverySelected, self.hoverId == "delivery",
+        self.pressedId == "delivery", focusDelivery, hasStore)
 
     if textured then
         self:drawIconSquare("store_lime", ui.cardX + 0.006, ui.fulfillmentY + 0.014, 0.022)
@@ -1441,11 +1883,31 @@ function FarmShopPhone:drawPhone()
 
     -- Главная кнопка.
     -- Кнопка вызова: широкая зелёная плашка с тёмной трубкой по центру.
+    local callEnabled = hasStore
+    local callHovered = self.hoverId == "call"
+    local callPressed = self.pressedId == "call"
+
     if textured then
         self:drawTexture("call_button_wide",
             ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH)
     else
-        drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 0.72, 0.95, 0.29, 1)
+        drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH,
+            callEnabled and 0.72 or 0.35, callEnabled and 0.95 or 0.40,
+            callEnabled and 0.29 or 0.20, 1)
+    end
+
+    -- Состояния кнопки: disabled, pressed, hover, focused.
+    if not callEnabled then
+        drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 0.06, 0.07, 0.08, 0.55)
+    elseif callPressed then
+        drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 0.10, 0.12, 0.13, 0.35)
+    elseif callHovered then
+        drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 1, 1, 1, 0.10)
+    end
+
+    if focusCall and callEnabled then
+        drawFilledRect(ui.buttonX + ui.buttonW - 0.005, ui.buttonY, 0.005, ui.buttonH,
+            0.72, 0.95, 0.29, 1)
     end
 
     -- Нижняя подсказка.
@@ -1500,14 +1962,17 @@ function FarmShopPhone:applyDeliverySpawnPlace(target)
         return false
     end
 
+    -- Use the stored delivery size for collision checking
+    local size = self.deliverySize or FarmShopPhone.DELIVERY_SAFETY.defaultSize
+
     -- ПРОВЕРКА БЕЗОПАСНОСТИ: проверяем место доставки перед применением
-    local safe, reason = self:isDeliveryLocationSafe(target[1], target[2], target[3])
+    local safe, reason = self:isDeliveryLocationSafe(target[1], target[2], target[3], size)
     if not safe then
         print("[FarmShopPhone] Delivery skipped: " .. (reason or "unsafe location"))
         self:showDeliveryError(reason)
         
         -- Пытаемся найти безопасное место рядом
-        local safeTarget = self:findSafeDeliveryLocation(target[1], target[2], target[3], target)
+        local safeTarget = self:findSafeDeliveryLocation(target[1], target[2], target[3], target, size)
         if safeTarget ~= nil then
             print("[FarmShopPhone] Found safe alternative delivery location")
             self:showDeliverySuccess(getText("FSP_DELIVERY_FALLBACK"))
@@ -1539,11 +2004,14 @@ function FarmShopPhone:applyDeliverySpawnPlace(target)
     end
 
     self.deliveryApplied = true
-    print(string.format("[FarmShopPhone] Delivery point applied: X=%.1f Z=%.1f", target[1], target[3]))
+    self.appliedSpawnSnapshot = self:saveSpawnPlace(place)
+    print(string.format("[FarmShopPhone][Delivery] Delivery point applied: X=%.1f Z=%.1f", target[1], target[3]))
     return true
 end
 
 --- Возвращает исходное место появления покупок.
+-- Идемпотентно. Если после подмены значения изменил другой мод/система,
+-- восстановление отменяется, чтобы не затереть чужие изменения (ТЗ §6).
 function FarmShopPhone:restoreSpawnPlaceToOriginal()
     if not self.deliveryApplied then
         return
@@ -1551,11 +2019,28 @@ function FarmShopPhone:restoreSpawnPlaceToOriginal()
 
     local place = g_currentMission ~= nil and g_currentMission.storeSpawnPlaces ~= nil and g_currentMission.storeSpawnPlaces[1] or nil
     if place ~= nil and self.originalSpawnPlace ~= nil then
-        self:restoreSpawnPlace(place, self.originalSpawnPlace)
+        local current = self:saveSpawnPlace(place)
+        local conflict = false
+        if self.appliedSpawnSnapshot ~= nil then
+            for _, key in ipairs({"startX", "startY", "startZ", "rotX", "rotY", "rotZ",
+                                  "dirX", "dirY", "dirZ", "dirPerpX", "dirPerpY", "dirPerpZ"}) do
+                if current[key] ~= self.appliedSpawnSnapshot[key] then
+                    conflict = true
+                    break
+                end
+            end
+        end
+
+        if conflict then
+            print("[FarmShopPhone][SpawnRestore] WARNING: store spawn place was changed by another system; restore skipped to avoid overwriting.")
+        else
+            self:restoreSpawnPlace(place, self.originalSpawnPlace)
+        end
     end
 
     self.deliveryApplied = false
-    print("[FarmShopPhone] Delivery point restored to the store spawn place.")
+    self.appliedSpawnSnapshot = nil
+    print("[FarmShopPhone][SpawnRestore] Delivery point restored to the store spawn place.")
 end
 
 --- Переносит места спавна паллет паллетной станции в точку доставки.
@@ -1566,14 +2051,17 @@ function FarmShopPhone:applyPalletSpawnPlaces(placeable, target)
         return false
     end
 
+    -- Use the stored delivery size for collision checking
+    local size = self.deliverySize or FarmShopPhone.DELIVERY_SAFETY.defaultSize
+
     -- ПРОВЕРКА БЕЗОПАСНОСТИ для паллетной доставки
-    local safe, reason = self:isDeliveryLocationSafe(target[1], target[2], target[3])
+    local safe, reason = self:isDeliveryLocationSafe(target[1], target[2], target[3], size)
     if not safe then
         print("[FarmShopPhone] Pallet delivery skipped: " .. (reason or "unsafe location"))
         self:showDeliveryError(reason)
         
         -- Пытаемся найти безопасное место рядом
-        local safeTarget = self:findSafeDeliveryLocation(target[1], target[2], target[3], target)
+        local safeTarget = self:findSafeDeliveryLocation(target[1], target[2], target[3], target, size)
         if safeTarget ~= nil then
             print("[FarmShopPhone] Found safe alternative delivery location for pallet")
             target = safeTarget
@@ -1620,50 +2108,102 @@ function FarmShopPhone:applyPalletSpawnPlaces(placeable, target)
         })
     end
 
-    -- Распределяем паллеты по доступным местам спавна (по одному на место)
+    -- Распределяем паллеты по доступным местам спавна в одну линию вдоль
+    -- перпендикуляра к направлению доставки, чтобы объекты не накладывались
+    -- друг на друга (ТЗ §6, замечание о нескольких паллетах в одной точке).
     local maxPallets = math.min(#places, 10)  -- макс 10 паллет за раз
+    local spec = placeable.spec_palletBuyingStation
+    local perpX = target.dirPerpX or 0
+    local perpZ = target.dirPerpZ or 1
+
+    self.palletAppliedSnapshot = {}
     for i = 1, maxPallets do
         local place = places[i]
-        place.startX, place.startY, place.startZ = target[1], target[2], target[3]
+
+        -- Реальные габариты паллеты, если они известны специализации станции.
+        local palletWidth, palletLength = 2.5, 3.0
+        if spec and spec.palletSpawner and spec.palletSpawner.pallets and spec.palletSpawner.pallets[i] then
+            local pallet = spec.palletSpawner.pallets[i]
+            if pallet.size then
+                palletWidth = pallet.size.width or pallet.size.x or palletWidth
+                palletLength = pallet.size.length or pallet.size.z or palletLength
+            end
+        end
+
+        -- Смещение от центральной точки: паллеты стоят рядом, а не в одной точке.
+        local spacing = palletWidth + 1.0
+        local offset = (i - (maxPallets + 1) * 0.5) * spacing
+        local px = target[1] + perpX * offset
+        local pz = target[3] + perpZ * offset
+        local py = deliveryTerrainHeight(px, pz) or target[2]
+
+        place.startX, place.startY, place.startZ = px, py, pz
         if target.rotX ~= nil then
             place.rotX, place.rotY, place.rotZ = target.rotX, target.rotY, target.rotZ
             place.dirX, place.dirY, place.dirZ = target.dirX, target.dirY, target.dirZ
             place.dirPerpX, place.dirPerpY, place.dirPerpZ =
                 target.dirPerpX, target.dirPerpY, target.dirPerpZ
         end
-        -- Небольшой рандомизированный сдвиг для избежания идеального наложения
-        local offset = 0.3
-        place.startX = place.startX + (math.random() - 0.5) * offset
-        place.startZ = place.startZ + (math.random() - 0.5) * offset
-    end
 
-    -- Остальные места оставляем нетронутыми (восстановятся при restore)
-    for i = maxPallets + 1, #places do
-        -- оставляем как есть
+        table.insert(self.palletAppliedSnapshot, {
+            place = place,
+            startX = place.startX, startY = place.startY, startZ = place.startZ,
+            rotX = place.rotX, rotY = place.rotY, rotZ = place.rotZ,
+            dirX = place.dirX, dirY = place.dirY, dirZ = place.dirZ,
+            dirPerpX = place.dirPerpX, dirPerpY = place.dirPerpY, dirPerpZ = place.dirPerpZ
+        })
     end
 
     self.palletDeliveryApplied = true
-    print(string.format("[FarmShopPhone] Pallet delivery point applied: X=%.1f Z=%.1f (pallets: %d)", target[1], target[3], maxPallets))
+    print(string.format("[FarmShopPhone][Delivery] Pallet delivery point applied: X=%.1f Z=%.1f (pallets: %d)",
+        target[1], target[3], maxPallets))
     return true
 end
 
---- Возвращает места спавна паллет станции.
+
 function FarmShopPhone:restorePalletSpawnPlaces()
     if not self.palletDeliveryApplied or self.palletSpawnBackup == nil then
         return
     end
 
+    -- Снимок выставленных значений (если делался) — для проверки конфликтов.
+    local appliedByPlace = {}
+    if self.palletAppliedSnapshot ~= nil then
+        for _, snap in ipairs(self.palletAppliedSnapshot) do
+            appliedByPlace[snap.place] = snap
+        end
+    end
+
     for _, entry in ipairs(self.palletSpawnBackup.places) do
         local place = entry.place
-        place.startX, place.startY, place.startZ = entry.startX, entry.startY, entry.startZ
-        place.rotX, place.rotY, place.rotZ = entry.rotX, entry.rotY, entry.rotZ
-        place.dirX, place.dirY, place.dirZ = entry.dirX, entry.dirY, entry.dirZ
-        place.dirPerpX, place.dirPerpY, place.dirPerpZ = entry.dirPerpX, entry.dirPerpY, entry.dirPerpZ
+        local snap = appliedByPlace[place]
+
+        if snap ~= nil then
+            local conflict = place.startX ~= snap.startX or place.startY ~= snap.startY
+                or place.startZ ~= snap.startZ or place.rotY ~= snap.rotY
+                or place.dirY ~= snap.dirY
+            if conflict then
+                print("[FarmShopPhone][SpawnRestore] WARNING: pallet spawn place changed by another system; restore skipped.")
+            else
+                place.startX, place.startY, place.startZ = entry.startX, entry.startY, entry.startZ
+                place.rotX, place.rotY, place.rotZ = entry.rotX, entry.rotY, entry.rotZ
+                place.dirX, place.dirY, place.dirZ = entry.dirX, entry.dirY, entry.dirZ
+                place.dirPerpX, place.dirPerpY, place.dirPerpZ =
+                    entry.dirPerpX, entry.dirPerpY, entry.dirPerpZ
+            end
+        else
+            place.startX, place.startY, place.startZ = entry.startX, entry.startY, entry.startZ
+            place.rotX, place.rotY, place.rotZ = entry.rotX, entry.rotY, entry.rotZ
+            place.dirX, place.dirY, place.dirZ = entry.dirX, entry.dirY, entry.dirZ
+            place.dirPerpX, place.dirPerpY, place.dirPerpZ =
+                entry.dirPerpX, entry.dirPerpY, entry.dirPerpZ
+        end
     end
 
     self.palletDeliveryApplied = false
     self.palletSpawnBackup = nil
-    print("[FarmShopPhone] Pallet delivery point restored.")
+    self.palletAppliedSnapshot = nil
+    print("[FarmShopPhone][SpawnRestore] Pallet delivery point restored.")
 end
 
 --- Откладывает возврат мест спавна паллет, чтобы асинхронный спавн
@@ -1706,19 +2246,35 @@ function FarmShopPhone:installFinanceHook()
     print("[FarmShopPhone] Finance hook installed (delivery fee).")
 end
 
---- Начисляет плату за доставку (2.5% от стоимости покупки) во время покупок в каталоге.
+--- Подтверждает факт покупки по реальному списанию в каталоге (ТЗ §5).
+-- Для доставки дополнительно начисляет плату 2.5%; для самовывоза платы нет.
 function FarmShopPhone:handleFinanceStats(amount, statType)
-    -- Доставка может быть активна через общую точку спавна или через
-    -- palletSpawner выбранной паллетной станции.
-    if not (FarmShopPhone.deliveryApplied or FarmShopPhone.palletDeliveryApplied) then
+    -- События учитываются только в рамках активного заказа.
+    if not self.orderActive then
         return
     end
+
+    local state = FarmShopPhone.orderState
+    if state ~= FarmShopPhone.ORDER_STATE.SHOP_OPEN
+            and state ~= FarmShopPhone.ORDER_STATE.PURCHASE_PENDING
+            and state ~= FarmShopPhone.ORDER_STATE.PURCHASE_CONFIRMED then
+        return
+    end
+
     if g_gui == nil or not g_gui:getIsGuiVisible() then
         return
     end
     if amount == nil or amount >= 0 or (-amount) <= 25.0 then
         return
     end
+
+    -- Защита от повторной обработки одного и того же списания.
+    local signature = tostring(statType) .. "|" .. tostring(amount)
+    if FarmShopPhone.lastPurchaseSignature == signature then
+        print("[FarmShopPhone][Purchase] Duplicate finance event ignored: " .. signature)
+        return
+    end
+    FarmShopPhone.lastPurchaseSignature = signature
 
     local itemPurchase = false
     if statType ~= nil then
@@ -1730,7 +2286,7 @@ function FarmShopPhone:handleFinanceStats(amount, statType)
             end
         end
 
-        -- Животные не относятся к доставке магазинных товаров.
+        -- Животные не относятся к покупкам магазинных товаров.
         if itemPurchase and statType == "other" and FocusManager.currentGui ~= nil
                 and string.upper(tostring(FocusManager.currentGui)) == "ANIMALSCREEN" then
             itemPurchase = false
@@ -1739,33 +2295,65 @@ function FarmShopPhone:handleFinanceStats(amount, statType)
 
     if statType == "newVehiclesCost" or statType == "vehicleLeasingCost"
             or statType == "purchasePallets" or itemPurchase then
-        local charge = (-amount) * FarmShopPhone.deliveryRate
-        if charge > FarmShopPhone.deliveryMaxCharge then
-            charge = FarmShopPhone.deliveryMaxCharge
-        end
-        FarmShopPhone.deliveryTotalCharges = FarmShopPhone.deliveryTotalCharges + charge
-        FarmShopPhone.deliveryFarmId = g_currentMission:getFarmId()
+        self:setOrderState(FarmShopPhone.ORDER_STATE.PURCHASE_PENDING)
+
         FarmShopPhone.purchaseConfirmed = true
-        FarmShopPhone.pendingDelivery = true
         FarmShopPhone.lastKnownFinanceStats = statType
-        print(string.format("[FarmShopPhone] Delivery fee +%.2f (pending %.2f)", charge, FarmShopPhone.deliveryTotalCharges))
+
+        if FarmShopPhone.deliveryApplied or FarmShopPhone.palletDeliveryApplied then
+            -- Доставка: начисляем плату 2.5% от стоимости покупки.
+            local charge = (-amount) * FarmShopPhone.deliveryRate
+            if charge > FarmShopPhone.deliveryMaxCharge then
+                charge = FarmShopPhone.deliveryMaxCharge
+            end
+            FarmShopPhone.deliveryTotalCharges = FarmShopPhone.deliveryTotalCharges + charge
+            if g_currentMission ~= nil and g_currentMission.getFarmId ~= nil then
+                FarmShopPhone.deliveryFarmId = g_currentMission:getFarmId()
+            end
+            FarmShopPhone.pendingDelivery = true
+            print(string.format("[FarmShopPhone][Purchase] Purchase confirmed: %s, delivery fee +%.2f (pending %.2f)",
+                tostring(statType), charge, FarmShopPhone.deliveryTotalCharges))
+        else
+            -- Самовывоз: платёж подтверждён, доставка не нужна.
+            FarmShopPhone.pendingDelivery = false
+            print(string.format("[FarmShopPhone][Purchase] Pickup purchase confirmed: %s", tostring(statType)))
+        end
+
+        self:setOrderState(FarmShopPhone.ORDER_STATE.PURCHASE_CONFIRMED)
     end
 end
 
 --- Списывает накопленную плату за доставку (вызывается при закрытии каталога).
+-- Идемпотентно: после успешного списания все флаги сбрасываются, повторный вызов
+-- не приводит к повторному списанию (ТЗ §5).
 function FarmShopPhone:chargeDeliveryFee()
+    if not (FarmShopPhone.purchaseConfirmed and FarmShopPhone.pendingDelivery) then
+        FarmShopPhone.deliveryTotalCharges = 0
+        FarmShopPhone.deliveryFarmId = nil
+        FarmShopPhone.purchaseConfirmed = false
+        FarmShopPhone.pendingDelivery = false
+        FarmShopPhone:setOrderState(FarmShopPhone.ORDER_STATE.CANCELLED)
+        FarmShopPhone:logValidation("delivery fee not charged: no confirmed purchase")
+        return
+    end
+
     if FarmShopPhone.deliveryValidationFailed then
         FarmShopPhone.deliveryTotalCharges = 0
         FarmShopPhone.deliveryFarmId = nil
-        FarmShopPhone:logValidation("delivery failed: fee not charged")
-        FarmShopPhone:notifyDeliveryError("FSP_DELIVERY_FAILED")
         FarmShopPhone.deliveryValidationFailed = false
+        FarmShopPhone.purchaseConfirmed = false
+        FarmShopPhone.pendingDelivery = false
+        FarmShopPhone:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_FAILED)
+        FarmShopPhone:notifyDeliveryError("FSP_DELIVERY_FAILED")
         return
     end
 
     if FarmShopPhone.deliveryTotalCharges < 0.01 then
         FarmShopPhone.deliveryTotalCharges = 0
         FarmShopPhone.deliveryFarmId = nil
+        FarmShopPhone.purchaseConfirmed = false
+        FarmShopPhone.pendingDelivery = false
+        FarmShopPhone:setOrderState(FarmShopPhone.ORDER_STATE.COMPLETED)
         return
     end
 
@@ -1781,9 +2369,15 @@ function FarmShopPhone:chargeDeliveryFee()
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO, text, nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
     end
 
-    print(string.format("[FarmShopPhone] Delivery fee charged: %d", fee))
+    print(string.format("[FarmShopPhone][Delivery] Delivery fee charged: %d", fee))
+    FarmShopPhone:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_COMPLETED)
+
     FarmShopPhone.deliveryTotalCharges = 0
     FarmShopPhone.deliveryFarmId = nil
+    FarmShopPhone.purchaseConfirmed = false
+    FarmShopPhone.pendingDelivery = false
+    FarmShopPhone.lastKnownFinanceStats = nil
+    FarmShopPhone.lastPurchaseSignature = nil
 end
 
 function FarmShopPhone:update(dt)
@@ -1807,26 +2401,40 @@ function FarmShopPhone:update(dt)
         if g_gui:getIsGuiVisible() then
             self.shopWasVisible = true
         elseif self.shopWasVisible then
+            -- Каталог закрыт: заказ либо завершён, либо отменён.
             self.orderActive = false
             self.shopWasVisible = false
-            self.callPosition = nil
-            -- Возвращаем места спавна
-            self:restoreSpawnPlaceToOriginal()
-            self:schedulePalletRestore(1.5)
-            
-            -- Списываем плату за доставку ТОЛЬКО если покупка подтверждена
-            if FarmShopPhone.purchaseConfirmed and FarmShopPhone.pendingDelivery then
-                FarmShopPhone:chargeDeliveryFee()
+
+            if FarmShopPhone.purchaseConfirmed then
+                -- Покупка подтверждена реальным списанием: завершаем заказ.
+                if FarmShopPhone.pendingDelivery then
+                    self:restoreSpawnPlaceToOriginal()
+                    self:schedulePalletRestore(1.5)
+                    FarmShopPhone:chargeDeliveryFee()
+                    self:notifyOrderResult("delivery")
+                else
+                    self:restoreSpawnPlaces()
+                    FarmShopPhone:setOrderState(FarmShopPhone.ORDER_STATE.COMPLETED)
+                    self:notifyOrderResult("pickup")
+                    FarmShopPhone.deliveryTotalCharges = 0
+                    FarmShopPhone.deliveryFarmId = nil
+                    FarmShopPhone.purchaseConfirmed = false
+                    FarmShopPhone.pendingDelivery = false
+                    FarmShopPhone.lastKnownFinanceStats = nil
+                    FarmShopPhone.lastPurchaseSignature = nil
+                end
             else
+                -- Каталог закрыт без покупки: успешный заказ не показываем (ТЗ §5).
+                print("[FarmShopPhone][Order] Catalog closed without purchase.")
+                self:restoreSpawnPlaces()
+                FarmShopPhone:setOrderState(FarmShopPhone.ORDER_STATE.CANCELLED)
                 FarmShopPhone.deliveryTotalCharges = 0
                 FarmShopPhone.deliveryFarmId = nil
-                FarmShopPhone:logValidation("delivery fee not charged: no confirmed purchase")
+                FarmShopPhone.purchaseConfirmed = false
+                FarmShopPhone.pendingDelivery = false
+                FarmShopPhone.lastKnownFinanceStats = nil
+                FarmShopPhone.lastPurchaseSignature = nil
             end
-            
-            -- Сбрасываем флаги покупки
-            FarmShopPhone.purchaseConfirmed = false
-            FarmShopPhone.pendingDelivery = false
-            FarmShopPhone.lastKnownFinanceStats = nil
 
             -- Разблокируем движение после закрытия каталога
             if g_localPlayer ~= nil then
@@ -1842,6 +2450,16 @@ function FarmShopPhone:update(dt)
             self.palletRestoreTimer = 0
             self:restorePalletSpawnPlaces()
         end
+    end
+
+    -- Периодическая проверка доступности выбранных магазинов (каждые 5 секунд)
+    if self.storeAvailabilityTimer == nil then
+        self.storeAvailabilityTimer = 0
+    end
+    self.storeAvailabilityTimer = self.storeAvailabilityTimer + dt
+    if self.storeAvailabilityTimer > 5000 then  -- 5 seconds
+        self.storeAvailabilityTimer = 0
+        self:verifyStoreAvailability()
     end
 end
 

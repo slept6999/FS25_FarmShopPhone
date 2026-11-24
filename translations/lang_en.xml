@@ -14,10 +14,6 @@
         <text name="FSP_UI_HINT_2" text="A / D or arrows - fulfillment" />
         <text name="FSP_UI_HINT_3" text="ENTER - open shop | ESC - close" />
         <text name="FSP_UI_FEE" text="Delivery fee 2.5% (max. 5000 EUR)" />
-        <text name="FSP_UI_KIND_PALLET" text="Goods / Pallets" />
-        <text name="FSP_UI_KIND_VEHICLE" text="Machinery" />
-        <text name="FSP_UI_KIND_STANDARD" text="Main store" />
-        <text name="FSP_UI_KIND_OTHER" text="Store" />
         <text name="FSP_UI_PICKUP_TINY" text="Pickup" />
         <text name="FSP_UI_DELIVERY_TINY" text="Delivery +2.5%" />
         <text name="FSP_DELIVERY_UNSAFE" text="Delivery unavailable: no safe spot nearby" />
@@ -26,5 +22,8 @@
         <text name="FSP_DELIVERY_STEEP" text="Delivery unavailable: slope too steep" />
         <text name="FSP_DELIVERY_TOO_SMALL" text="Delivery unavailable: not enough clearance from player" />
         <text name="FSP_DELIVERY_OBSTRUCTED" text="Delivery unavailable: area is occupied" />
-    <text name="FSP_DELIVERY_SLOPE" text="Terrain slope too steep" /><text name="FSP_DELIVERY_OBSTACLE" text="Obstacle detected at delivery location" /><text name="FSP_DELIVERY_CLEARANCE" text="Insufficient ground clearance" /><text name="FSP_DELIVERY_UNSAFE_GENERIC" text="Delivery location is unsafe" /><text name="FSP_DELIVERY_FALLBACK" text="Safe alternative delivery location found" /></texts>
+        <text name="FSP_DELIVERY_FAILED" text="Delivery failed" />
+        <text name="FSP_DELIVERY_DONE" text="Delivery complete. Goods placed near you" />
+        <text name="FSP_ORDER_PICKUP_DONE" text="Purchase complete. Pick up your goods at: %s" />
+    <text name="FSP_DELIVERY_UNSAFE_GENERIC" text="Delivery location is unsafe" /><text name="FSP_DELIVERY_FALLBACK" text="Safe alternative delivery location found" /></texts>
 </l10n>

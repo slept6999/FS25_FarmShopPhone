@@ -22,3 +22,6 @@ log.txt
 *.bak
 __pycache__/
 *.pyc
+
+# Сборочный архив мода (публикуется через Releases, не в репозитории)
+FS25_FarmShopPhone.zip
