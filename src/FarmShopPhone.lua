@@ -188,7 +188,8 @@ FarmShopPhone.evidenceSpent = 0         -- сумма списаний в рам
 FarmShopPhone.pendingLoads = {}         -- loading data, запущенные внутри заказа (токен -> заказ)
 FarmShopPhone.pendingLoadCount = 0      -- сколько таких загрузок ещё не завершилось
 FarmShopPhone.pendingWaitTimer = 0
-FarmShopPhone.chargeVerifyPending = nil -- отложенная проверка списания (асинхронный баланс)      -- страховочный таймаут ожидания загрузок перед завершением заказа
+FarmShopPhone.chargeVerifyPending = nil -- отложенная проверка списания (асинхронный баланс)
+FarmShopPhone.DEBUG_SHOP_CONTEXT = true   -- временно: дамп контекста ShopMenu для исследования      -- страховочный таймаут ожидания загрузок перед завершением заказа
 FarmShopPhone.patchedSpawners = {}      -- palletSpawner'ы, чьи места подменял мод
 FarmShopPhone.deliveryFailure = nil     -- причина неудачи размещения ("no_space", ...)
 FarmShopPhone.deliveryPartial = false   -- часть товара не удалось разместить
@@ -232,6 +233,62 @@ FarmShopPhone.palletDeliveryApplied = false
 --- Возвращает локализованную строку по имени ключа из modDesc.xml (секция <l10n>).
 local function getText(name)
     return g_i18n:getText(name)
+end
+
+--- Отладочный дамп контекста ShopMenu (временно, для исследования пустого каталога).
+local function debugDumpShopMenuContext(store)
+    if not FarmShopPhone.DEBUG_SHOP_CONTEXT then
+        return
+    end
+
+    print(string.format("[FarmShopPhone][UI][Debug] dump ShopMenu context for: %s (mode=%s)",
+        tostring(store.name), tostring(store.openMode)))
+    print("[FarmShopPhone][UI][Debug] ShopMenu class type: " .. type(ShopMenu))
+
+    local targets = {}
+    if g_gui ~= nil and g_gui.screenControllers ~= nil and ShopMenu ~= nil then
+        targets["screenController"] = g_gui.screenControllers[ShopMenu]
+    end
+    if g_currentMission ~= nil then
+        targets["mission.shopMenu"] = g_currentMission.shopMenu
+    end
+    targets["g_shopMenu"] = rawget(_G, "g_shopMenu")
+
+    for label, obj in pairs(targets) do
+        if obj == nil then
+            print("[FarmShopPhone][UI][Debug] " .. label .. " = nil")
+        else
+            local keys = {}
+            for k, v in pairs(obj) do
+                keys[#keys + 1] = tostring(k) .. "=" .. type(v)
+                if #keys >= 60 then break end
+            end
+            print(string.format("[FarmShopPhone][UI][Debug] %s fields (%s): %s",
+                label, type(obj), table.concat(keys, ", ")))
+            local mt = getmetatable(obj)
+            if mt ~= nil then
+                local mkeys = {}
+                for k, v in pairs(mt) do
+                    mkeys[#mkeys + 1] = tostring(k) .. "=" .. type(v)
+                    if #mkeys >= 60 then break end
+                end
+                print(string.format("[FarmShopPhone][UI][Debug] %s metatable: %s",
+                    label, table.concat(mkeys, ", ")))
+            end
+        end
+    end
+end
+
+--- Расстояние, на которое переместился игрок (для диагностики телепорта).
+local function playerMovedDistance(before)
+    if before == nil then
+        return -1
+    end
+    if g_localPlayer == nil or g_localPlayer.rootNode == nil then
+        return -1
+    end
+    local x, y, z = getWorldTranslation(g_localPlayer.rootNode)
+    return math.sqrt((x - before[1]) ^ 2 + (y - before[2]) ^ 2 + (z - before[3]) ^ 2)
 end
 
 --- Возвращает текущие мировые координаты локального игрока (x, y, z).
@@ -896,6 +953,7 @@ function FarmShopPhone:resetOrderContext()
     self.deliveryTarget = nil
     self.deliverySize = nil
     self.orderStoreName = nil
+    self.debugPlayerBefore = nil
     FarmShopPhone.chargeVerifyPending = nil
 end
 
@@ -1298,6 +1356,14 @@ function FarmShopPhone:openShop()
         self:restoreSpawnPlaces()
     end
 
+    debugDumpShopMenuContext(store)
+
+    -- Запоминаем позицию игрока до открытия (диагностика телепортации).
+    self.debugPlayerBefore = nil
+    if g_localPlayer ~= nil and g_localPlayer.rootNode ~= nil then
+        self.debugPlayerBefore = {getWorldTranslation(g_localPlayer.rootNode)}
+    end
+
     -- При открытии каталога закрываем телефон, чтобы не блокировать ввод.
     self:closePhone()
 
@@ -1314,9 +1380,11 @@ function FarmShopPhone:openShop()
     if not opened then
         -- Резервного перехода на общий ShopMenu нет: иначе игрок может купить
         -- в чужой торговой точке вместо выбранной. Отменяем подготовку заказа.
-        print(string.format("[FarmShopPhone][UI] Store interface could not be opened: name=%s kind=%s mode=%s placeable=%s trigger=%s",
+        local moved = playerMovedDistance(self.debugPlayerBefore)
+        print(string.format("[FarmShopPhone][UI] Store interface could not be opened: name=%s kind=%s mode=%s placeable=%s trigger=%s reason=open_interface_failed playerDistance=%.1f playerTeleported=%s",
             tostring(store.name), tostring(store.kind), tostring(store.openMode),
-            store.placeable ~= nil and "yes" or "no", store.triggerObject ~= nil and "yes" or "no"))
+            store.placeable ~= nil and "yes" or "no", store.triggerObject ~= nil and "yes" or "no",
+            moved, tostring(moved > 1.0)))
         -- Звонок не удался: возвращаем плату за вызов, чтобы игрок не платил за неработающую точку.
         self:refundCallFee()
         self:notifyOrderResult("delivery", getText("FSP_STORE_OPEN_FAILED"))
@@ -1324,9 +1392,10 @@ function FarmShopPhone:openShop()
         return false
     end
 
-    print(string.format("[FarmShopPhone][UI] Store interface opened: name=%s kind=%s mode=%s placeable=%s",
+    local moved = playerMovedDistance(self.debugPlayerBefore)
+    print(string.format("[FarmShopPhone][UI] Store interface opened: name=%s kind=%s mode=%s placeable=%s playerDistance=%.1f playerTeleported=%s",
         tostring(store.name), tostring(store.kind), tostring(store.openMode),
-        store.placeable ~= nil and "yes" or "no"))
+        store.placeable ~= nil and "yes" or "no", moved, tostring(moved > 1.0)))
     self.catalogOpenedByUs = true
     self.orderActive = true
     if self.fulfillment == "delivery" then
