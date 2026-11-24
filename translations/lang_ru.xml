@@ -20,5 +20,11 @@
         <text name="FSP_UI_KIND_OTHER" text="Магазин" />
         <text name="FSP_UI_PICKUP_TINY" text="Самовывоз" />
         <text name="FSP_UI_DELIVERY_TINY" text="Доставка +2,5%" />
+        <text name="FSP_DELIVERY_UNSAFE" text="Доставка невозможна: рядом нет безопасного места" />
+        <text name="FSP_DELIVERY_WATER" text="Доставка невозможна: вода или неизвестный рельеф" />
+        <text name="FSP_DELIVERY_UNEVEN" text="Доставка невозможна: ямы или канавы рядом" />
+        <text name="FSP_DELIVERY_STEEP" text="Доставка невозможна: слишком крутой уклон" />
+        <text name="FSP_DELIVERY_TOO_SMALL" text="Доставка невозможна: слишком близко к игроку или машине" />
+        <text name="FSP_DELIVERY_OBSTRUCTED" text="Доставка невозможна: место занято" />
     </texts>
 </l10n>

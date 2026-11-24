@@ -20,5 +20,11 @@
         <text name="FSP_UI_KIND_OTHER" text="Store" />
         <text name="FSP_UI_PICKUP_TINY" text="Pickup" />
         <text name="FSP_UI_DELIVERY_TINY" text="Delivery +2.5%" />
+        <text name="FSP_DELIVERY_UNSAFE" text="Delivery unavailable: no safe spot nearby" />
+        <text name="FSP_DELIVERY_WATER" text="Delivery unavailable: water or invalid terrain" />
+        <text name="FSP_DELIVERY_UNEVEN" text="Delivery unavailable: pits or ditches nearby" />
+        <text name="FSP_DELIVERY_STEEP" text="Delivery unavailable: slope too steep" />
+        <text name="FSP_DELIVERY_TOO_SMALL" text="Delivery unavailable: not enough clearance from player" />
+        <text name="FSP_DELIVERY_OBSTRUCTED" text="Delivery unavailable: area is occupied" />
     </texts>
 </l10n>

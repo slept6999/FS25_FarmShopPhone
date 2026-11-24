@@ -117,6 +117,23 @@ end
 -- Ручной выбор точки на карте не поддерживается.
 FarmShopPhone.callPosition = nil
 
+-- Проверка безопасности места доставки (все пороги — в одном месте).
+FarmShopPhone.DELIVERY_SAFETY = {
+    debug = false,
+    defaultSize = { width = 2.5, length = 3.0, height = 2.0 },
+    radii = { 0, 3, 6, 10, 15, 20 },
+    directions = 12,
+    maxSlopeDeg = 8.0,
+    preferredSlopeDeg = 3.0,
+    maxHeightDiff = 0.8,
+    minPlayerClearance = 2.0,
+    maxScoreDistance = 20.0
+}
+
+-- Выбранное автоматически безопасное место доставки.
+FarmShopPhone.deliveryTarget = nil
+FarmShopPhone.deliveryValidationFailed = false
+
 -- Флаг того, что каталог магазина открыт и заказ ожидает завершения.
 FarmShopPhone.orderActive = false
 FarmShopPhone.shopWasVisible = false
@@ -610,6 +627,8 @@ function FarmShopPhone:openPhone()
     -- Каждый раз при открытии телефона сбрасываем способ получения на "Самовывоз".
     self.fulfillment = "pickup"
     self.callPosition = nil
+    self.deliveryTarget = nil
+    self.deliveryValidationFailed = false
     self.storeScrollOffset = 1
 
     self:discoverStores()
@@ -645,6 +664,229 @@ function FarmShopPhone:captureCallPosition()
         print("[FarmShopPhone] Cannot capture the order position: local player is unavailable.")
         return false
     end
+    return true
+end
+
+--- Отладочный лог валидации (по умолчанию выключен).
+function FarmShopPhone:logValidation(message)
+    if FarmShopPhone.DELIVERY_SAFETY.debug then
+        print("[FarmShopPhone][DeliveryValidation] " .. tostring(message))
+    end
+end
+
+--- Выводит понятное игроку уведомление об ошибке доставки.
+function FarmShopPhone:notifyDeliveryError(key)
+    if g_currentMission == nil or g_currentMission.hud == nil then
+        return
+    end
+
+    g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
+        getText(key), nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
+end
+
+--- Высота рельефа в точке. Возвращает nil для невалидной координаты.
+local function deliveryTerrainHeight(x, z)
+    local node = g_currentMission ~= nil and g_currentMission.terrainRootNode or g_terrainNode
+    if node == nil then
+        return nil
+    end
+
+    local ok, height = pcall(getTerrainHeightAtWorldPos, node, x, 0, z)
+    if not ok or height == nil or height < -1000 then
+        return nil
+    end
+
+    return height
+end
+
+--- Колбэк overlapBox: любое попадание считается препятствием.
+function FarmShopPhone:deliveryOverlapCallback(node)
+    if node ~= nil then
+        self.deliveryOverlapHit = true
+    end
+end
+
+--- Проверяет свободно ли место для габаритов объекта.
+-- Если collision API недоступен, честно возвращает "неизвестно" (true) —
+-- итоговую проверку всё равно выполняет placementManager движка.
+function FarmShopPhone:deliveryCollisionFree(x, y, z, size)
+    if overlapBox == nil or CollisionFlag == nil then
+        return true
+    end
+
+    local mask = (CollisionFlag.VEHICLE or 0) + (CollisionFlag.DYNAMIC_OBJECT or 0)
+            + (CollisionFlag.STATIC_OBJECT or 0) + (CollisionFlag.BUILDING or 0)
+            + (CollisionFlag.TREE or 0) + (CollisionFlag.WATER or 0)
+    if mask == 0 then
+        return true
+    end
+
+    self.deliveryOverlapHit = false
+    pcall(overlapBox, x, y, z, 0, 0, 0,
+        size.width * 0.5, size.height * 0.5, size.length * 0.5,
+        "deliveryOverlapCallback", self, mask, true, true, false, true)
+
+    return not self.deliveryOverlapHit
+end
+
+--- Проверяет одну кандидатную точку: рельеф, уклон, коллизии, игрока/машину.
+-- @return boolean ok, string reasonKey, number score, number y
+function FarmShopPhone:validateDeliveryArea(point, size)
+    local cfg = FarmShopPhone.DELIVERY_SAFETY
+    size = size or cfg.defaultSize
+
+    -- 9 точек: центр, 4 угла и 4 середины сторон.
+    local hx, hz = size.width * 0.5, size.length * 0.5
+    local samples = {
+        { point[1], point[3] },
+        { point[1] - hx, point[3] - hz }, { point[1] + hx, point[3] - hz },
+        { point[1] - hx, point[3] + hz }, { point[1] + hx, point[3] + hz },
+        { point[1], point[3] - hz }, { point[1], point[3] + hz },
+        { point[1] - hx, point[3] }, { point[1] + hx, point[3] }
+    }
+
+    local minH, maxH, centerH = math.huge, -math.huge, nil
+    for i, sample in ipairs(samples) do
+        local h = deliveryTerrainHeight(sample[1], sample[2])
+        if h == nil then
+            self:logValidation("candidate " .. i .. ": invalid terrain height")
+            return false, "FSP_DELIVERY_WATER", 0, 0
+        end
+        if i == 1 then
+            centerH = h
+        end
+        minH = math.min(minH, h)
+        maxH = math.max(maxH, h)
+    end
+
+    local heightDiff = maxH - minH
+    if heightDiff > cfg.maxHeightDiff then
+        self:logValidation(string.format("candidate rejected: height diff %.2f", heightDiff))
+        return false, "FSP_DELIVERY_UNEVEN", 0, centerH
+    end
+
+    local run = math.max(0.5, math.min(size.width, size.length))
+    local slopeDeg = math.deg(math.atan(heightDiff / run))
+    if slopeDeg > cfg.maxSlopeDeg then
+        self:logValidation(string.format("candidate rejected: slope %.1f deg", slopeDeg))
+        return false, "FSP_DELIVERY_STEEP", 0, centerH
+    end
+
+    -- Игрок и его машина: не подпускаем товар вплотную.
+    local player = g_localPlayer
+    local checkNode = nil
+    if player ~= nil then
+        if player.getCurrentVehicle ~= nil and player:getCurrentVehicle() ~= nil then
+            local vehicle = player:getCurrentVehicle()
+            checkNode = vehicle ~= nil and vehicle.rootNode or nil
+        elseif player.rootNode ~= nil then
+            checkNode = player.rootNode
+        end
+    end
+
+    if checkNode ~= nil and getWorldTranslation ~= nil then
+        local ox, _, oz = getWorldTranslation(checkNode)
+        local dist = math.sqrt((point[1] - ox) ^ 2 + (point[3] - oz) ^ 2)
+        local footprint = math.max(size.width, size.length) * 0.5
+        if dist < cfg.minPlayerClearance + footprint then
+            self:logValidation("candidate rejected: too close to player/vehicle")
+            return false, "FSP_DELIVERY_TOO_SMALL", 0, centerH
+        end
+    end
+
+    if not self:deliveryCollisionFree(point[1], centerH + size.height * 0.5,
+            point[3], size) then
+        self:logValidation("candidate rejected: collision detected")
+        return false, "FSP_DELIVERY_OBSTRUCTED", 0, centerH
+    end
+
+    -- Оценка: чем ровнее и ближе к игроку, тем лучше.
+    local distance = 0
+    if checkNode ~= nil and getWorldTranslation ~= nil then
+        local ox, _, oz = getWorldTranslation(checkNode)
+        distance = math.sqrt((point[1] - ox) ^ 2 + (point[3] - oz) ^ 2)
+    end
+
+    local score = 100.0 - slopeDeg * 4.0 - heightDiff * 6.0
+            - math.min(distance, cfg.maxScoreDistance) * 1.5
+    self:logValidation(string.format("candidate accepted: score %.1f slope %.1f diff %.2f",
+        score, slopeDeg, heightDiff))
+
+    return true, nil, score, centerH
+end
+
+--- Ищет безопасное место рядом с игроком детерминированным перебором.
+function FarmShopPhone:findSafeDeliveryTarget(size)
+    if not self:captureCallPosition() then
+        return nil
+    end
+
+    local cfg = FarmShopPhone.DELIVERY_SAFETY
+    local best, bestScore, bestHeight = nil, -math.huge, 0
+
+    for _, radius in ipairs(cfg.radii) do
+        for direction = 0, cfg.directions - 1 do
+            local angle = direction * (2.0 * math.pi / cfg.directions)
+            local point = {
+                self.callPosition[1] + math.cos(angle) * radius,
+                self.callPosition[2],
+                self.callPosition[3] + math.sin(angle) * radius
+            }
+
+            local ok, _, score, height = self:validateDeliveryArea(point, size)
+            if ok and score > bestScore then
+                best, bestScore, bestHeight = point, score, height
+            end
+        end
+
+        if best ~= nil then
+            break
+        end
+    end
+
+    if best == nil then
+        self:logValidation("no safe delivery location found")
+        return nil
+    end
+
+    best[2] = bestHeight
+    best.rotX, best.rotY, best.rotZ = 0, 0, 0
+    best.dirX, best.dirY, best.dirZ = 1, 0, 0
+    best.dirPerpX, best.dirPerpY, best.dirPerpZ = 0, 0, 1
+
+    self:logValidation("selected candidate X=" .. string.format("%.1f", best[1])
+        .. " Z=" .. string.format("%.1f", best[3]))
+    return best
+end
+
+--- Проверка этапа A: подготовить безопасную точку перед открытием каталога.
+function FarmShopPhone:prepareDeliveryTarget(store, size)
+    self.deliveryValidationFailed = false
+
+    if store ~= nil and store.kind == "palletBuying" and store.placeable ~= nil then
+        local spec = store.placeable.spec_palletBuyingStation
+        if spec ~= nil and spec.palletSpawner ~= nil and spec.palletSpawner.pallets ~= nil then
+            for _, pallet in ipairs(spec.palletSpawner.pallets) do
+                if pallet ~= nil and pallet.size ~= nil then
+                    size = {
+                        width = pallet.size.width or pallet.size.x or size.width,
+                        length = pallet.size.length or pallet.size.z or size.length,
+                        height = pallet.size.height or pallet.size.y or size.height
+                    }
+                    break
+                end
+            end
+        end
+    end
+
+    self.deliveryTarget = self:findSafeDeliveryTarget(size)
+
+    if self.deliveryTarget == nil then
+        self.deliveryValidationFailed = true
+        self:notifyDeliveryError("FSP_DELIVERY_UNSAFE")
+        return false
+    end
+
     return true
 end
 
@@ -692,20 +934,42 @@ function FarmShopPhone:openShop()
     self:restorePalletSpawnPlaces()
 
     if self.fulfillment == "delivery" then
-        self:captureCallPosition()
-
-        -- Доставка всегда идёт к позиции игрока в момент вызова каталога.
-        local target = self.callPosition
         local store = self.stores[self.selectedStore]
+
+        -- Этап A: без безопасного места рядом с игроком каталог не открываем.
+        if not self:prepareDeliveryTarget(store, FarmShopPhone.DELIVERY_SAFETY.defaultSize) then
+            return
+        end
+
+        -- Доставка всегда идёт к безопасной точке рядом с игроком.
+        local target = self.deliveryTarget
         local applied = false
 
         -- Паллетные магазины спавнят товар через собственный PalletSpawner.
         if store ~= nil and store.kind == "palletBuying" and store.placeable ~= nil then
-            applied = self:applyPalletSpawnPlaces(store.placeable, target)
+            local ok, result = pcall(function()
+                return self:applyPalletSpawnPlaces(store.placeable, target)
+            end)
+            if not ok then
+                print("[FarmShopPhone] Pallet spawn patch failed: " .. tostring(result))
+                self:restorePalletSpawnPlaces()
+                applied = false
+            else
+                applied = result
+            end
         end
 
         if not applied then
-            applied = self:applyDeliverySpawnPlace(target)
+            local ok, result = pcall(function()
+                return self:applyDeliverySpawnPlace(target)
+            end)
+            if not ok then
+                print("[FarmShopPhone] Store spawn patch failed: " .. tostring(result))
+                self:restoreSpawnPlaceToOriginal()
+                applied = false
+            else
+                applied = result
+            end
         end
     else
         self:restoreSpawnPlaceToOriginal()
@@ -788,6 +1052,8 @@ function FarmShopPhone:updatePhoneInput()
 
             if inRect(mouseX, mouseY, ui.deliveryX, ui.fulfillmentY, ui.cardW, ui.cardH) then
                 self.fulfillment = "delivery"
+                self:prepareDeliveryTarget(self.stores[self.selectedStore],
+                    FarmShopPhone.DELIVERY_SAFETY.defaultSize)
                 return
             end
 
@@ -836,12 +1102,16 @@ function FarmShopPhone:updatePhoneInput()
     end)
     self:handleKey(Input.KEY_d, function(phone)
         phone.fulfillment = "delivery"
+        phone:prepareDeliveryTarget(phone.stores[phone.selectedStore],
+            FarmShopPhone.DELIVERY_SAFETY.defaultSize)
     end)
     self:handleKey(Input.KEY_left, function(phone)
         phone.fulfillment = "pickup"
     end)
     self:handleKey(Input.KEY_right, function(phone)
         phone.fulfillment = "delivery"
+        phone:prepareDeliveryTarget(phone.stores[phone.selectedStore],
+            FarmShopPhone.DELIVERY_SAFETY.defaultSize)
     end)
 end
 
@@ -1335,6 +1605,15 @@ end
 
 --- Списывает накопленную плату за доставку (вызывается при закрытии каталога).
 function FarmShopPhone:chargeDeliveryFee()
+    if FarmShopPhone.deliveryValidationFailed then
+        FarmShopPhone.deliveryTotalCharges = 0
+        FarmShopPhone.deliveryFarmId = nil
+        FarmShopPhone:logValidation("delivery failed: fee not charged")
+        FarmShopPhone:notifyDeliveryError("FSP_DELIVERY_FAILED")
+        FarmShopPhone.deliveryValidationFailed = false
+        return
+    end
+
     if FarmShopPhone.deliveryTotalCharges < 0.01 then
         FarmShopPhone.deliveryTotalCharges = 0
         FarmShopPhone.deliveryFarmId = nil
