@@ -4,7 +4,6 @@
         <text name="input_FSP_OPEN_PHONE" text="Open Farm Shop Phone" />
         <text name="FSP_STORE_UNKNOWN" text="Unnamed shop" />
         <text name="FSP_NO_STORES" text="No eligible shop icons were found on this map" />
-        <text name="FSP_STANDARD_STORE" text="Standard store" />
         <text name="FSP_DELIVERY_FEE" text="Delivery fee" />
         <text name="FSP_UI_TITLE" text="FARM SHOP PHONE" />
         <text name="FSP_UI_SUBTITLE" text="Remote shop access" />
