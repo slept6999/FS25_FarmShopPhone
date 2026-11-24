@@ -279,6 +279,46 @@ local function debugDumpShopMenuContext(store)
     end
 end
 
+--- Безопасно возвращает число элементов списка каталога, если поле доступно.
+local function debugCatalogCount(container)
+    if type(container) ~= "table" then
+        return -1
+    end
+    for _, key in ipairs({"itemsList", "elements", "listItems"}) do
+        local value = rawget(container, key)
+        if type(value) == "table" then
+            return #value
+        end
+    end
+    return -1
+end
+
+--- Состояние ShopMenu после открытия (временная диагностика).
+local function debugShopMenuState(tag)
+    if not FarmShopPhone.DEBUG_SHOP_CONTEXT then
+        return
+    end
+
+    local sm = nil
+    if g_currentMission ~= nil then
+        sm = g_currentMission.shopMenu
+    end
+    if sm == nil and g_gui ~= nil and g_gui.screenControllers ~= nil and ShopMenu ~= nil then
+        sm = g_gui.screenControllers[ShopMenu]
+    end
+    if sm == nil then
+        print("[FarmShopPhone][UI][Debug] " .. tag .. ": ShopMenu controller = nil")
+        return
+    end
+
+    local candidates = { "shopMenu", "currentPage", "pageShopItems", "pageShopItemDetails" }
+    for _, key in ipairs(candidates) do
+        local obj = rawget(sm, key)
+        print(string.format("[FarmShopPhone][UI][Debug] %s.%s = %s, items=%d",
+            tag, key, tostring(obj ~= nil), debugCatalogCount(obj)))
+    end
+end
+
 --- Расстояние, на которое переместился игрок (для диагностики телепорта).
 local function playerMovedDistance(before)
     if before == nil then
@@ -1276,6 +1316,12 @@ function FarmShopPhone:openShop()
     end
     self.orderStoreName = store.name
 
+    local dbgSpec = store.placeable ~= nil and store.placeable.spec_vehicleBuyingStation or nil
+    print(string.format("[FarmShopPhone][UI] Open requested: storeName=%s storeKind=%s storeMode=%s shopTrigger=%s vehicleBuyingStation=%s",
+        tostring(store.name), tostring(store.kind), tostring(store.openMode),
+        store.triggerObject ~= nil and "yes" or "no",
+        dbgSpec ~= nil and "yes" or "no"))
+
     -- Новая операция: новый токен заказа; сбрасываем доказательства.
     FarmShopPhone.orderToken = FarmShopPhone.orderToken + 1
     FarmShopPhone.purchaseConfirmed = false
@@ -1388,6 +1434,8 @@ function FarmShopPhone:openShop()
     print(string.format("[FarmShopPhone][UI] Store interface opened: name=%s kind=%s mode=%s placeable=%s playerDistance=%.1f playerTeleported=%s",
         tostring(store.name), tostring(store.kind), tostring(store.openMode),
         store.placeable ~= nil and "yes" or "no", moved, tostring(moved > 1.0)))
+
+    debugShopMenuState("after-open")
 
     -- Телефонный звонок состоялся: точка открыта успешно — только теперь списываем плату.
     local feeOk, feeCharged, feeReason = pcall(FarmShopPhone.chargeCallFee, FarmShopPhone)
