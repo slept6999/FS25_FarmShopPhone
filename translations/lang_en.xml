@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <l10n>
     <texts>
         <text name="input_FSP_OPEN_PHONE" text="Open Farm Shop Phone" />
@@ -26,7 +26,9 @@
         <text name="FSP_DELIVERY_DONE" text="Delivery complete. Goods placed near you" />
         <text name="FSP_CALL_FEE" text="Phone call fee" />
         <text name="FSP_DELIVERY_PARTIAL" text="Delivery partially failed: some goods could not be placed" />
-        <text name="FSP_DELIVERY_FEE_FAILED" text="delivery fee was not charged, see log" />
+        <text name="FSP_DELIVERY_FEE_FAILED" text="Delivery fee was not charged, see log" />
         <text name="FSP_ORDER_PICKUP_DONE" text="Purchase complete. Pick up your goods at: %s" />
-    <text name="FSP_DELIVERY_UNSAFE_GENERIC" text="Delivery location is unsafe" /><text name="FSP_DELIVERY_FALLBACK" text="Safe alternative delivery location found" /></texts>
+        <text name="FSP_DELIVERY_UNSAFE_GENERIC" text="Delivery location is unsafe" />
+        <text name="FSP_DELIVERY_FALLBACK" text="Safe alternative delivery location found" />
+    </texts>
 </l10n>

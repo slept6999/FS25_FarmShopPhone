@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <l10n>
     <texts>
-        <text name="input_FSP_OPEN_PHONE" text="Открыть фермерского телефона" />
+        <text name="input_FSP_OPEN_PHONE" text="Открыть «Фермерский телефон»" />
         <text name="FSP_STORE_UNKNOWN" text="Магазин без названия" />
         <text name="FSP_NO_STORES" text="На этой карте не найдены подходящие значки магазинов" />
         <text name="FSP_DELIVERY_FEE" text="Плата за доставку" />
@@ -26,7 +26,9 @@
         <text name="FSP_DELIVERY_DONE" text="Доставка завершена. Товар размещён рядом с вами" />
         <text name="FSP_CALL_FEE" text="Плата за звонок" />
         <text name="FSP_DELIVERY_PARTIAL" text="Доставка завершена частично: часть товара не удалось разместить" />
-        <text name="FSP_DELIVERY_FEE_FAILED" text="плата за доставку не списана, см. лог" />
+        <text name="FSP_DELIVERY_FEE_FAILED" text="Плата за доставку не списана, см. лог" />
         <text name="FSP_ORDER_PICKUP_DONE" text="Покупка оформлена. Заберите товар в магазине: %s" />
-    <text name="FSP_DELIVERY_UNSAFE_GENERIC" text="Место доставки небезопасно" /><text name="FSP_DELIVERY_FALLBACK" text="Найдено безопасное альтернативное место доставки" /></texts>
+        <text name="FSP_DELIVERY_UNSAFE_GENERIC" text="Место доставки небезопасно" />
+        <text name="FSP_DELIVERY_FALLBACK" text="Найдено безопасное альтернативное место доставки" />
+    </texts>
 </l10n>

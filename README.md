@@ -1,66 +1,66 @@
-# Фермерский телефон для FS25
+# Farm Shop Phone for FS25
 
-Версия **0.2.6.2**. Мод открывает телефонный оверлей, автоматически находит торговые точки загруженной карты и даёт переход в стандартный каталог FS25. Он не добавляет здания, NPC и ассортимент, не меняет цены и экономику. Store Deliveries использовался только для изучения подхода; его скрипты и ресурсы не подключаются.
+Version **0.2.6.2**. The mod opens a phone overlay, automatically finds the trading points of the loaded map and lets you enter the standard FS25 shop interface. It adds no buildings, NPCs or assortment and does not change prices or the economy. Store Deliveries was used only as a reference for the approach; its scripts and assets are not loaded.
 
-## Возможности
+## Features
 
-- Клавиша **O** — открыть/закрыть телефон.
-- Обнаружение только точек с реально доступным интерфейсом покупки (`placeableSystem.placeables`, `mapHotspots` типа `SHOP`, `ShopTrigger`); `storeSpawnPlaces` не используется как источник.
-- Дедупликация по ссылке на объект, а не по названию/координатам.
-- Исключаются точки приёма сыпучих товаров (`spec_sellingStation`), дилеры животных (`spec_animalDealer`) и собственные мастерские (`ownWorkshop`).
-- Два способа получения: **самовывоз** и **доставка к игроку** с доплатой 2,5 % (максимум 5000). Плата за телефонный звонок — 10: звонком считается выбор продавца и открытие его магазина по кнопке «Позвонить» (списывается сразу при нажатии).
-- Проверка места доставки: рельеф по 9 точкам габарита, перепад высот, уклон, вода, коллизии, отступ от игрока/машины.
-- Паллеты размещаются линией (без наложения друг на друга) с учётом реальных габаритов.
-- Факт покупки подтверждается реальным созданием объекта (хуки `VehicleLoadingData`/`PlaceableLoadingData`), а не закрытием каталога и не финансовым событием.
-- Машина состояний заказа; частичная доставка не выдаётся за успех; плата за доставку считается только по типам покупок.
-- Централизованное восстановление мест спавна: идемпотентно, не затирает изменения других модов.
-- Только одиночная игра; многопользовательский режим отключён в `modDesc.xml`.
+- Key **O** opens/closes the phone.
+- Only shops with a genuinely available purchase interface are discovered (`placeableSystem.placeables`, `mapHotspots` of type `SHOP`, `ShopTrigger`); `storeSpawnPlaces` is not used as a source.
+- De-duplication is by object reference, not by name/coordinates.
+- Points that accept bulk goods (`spec_sellingStation`), animal dealers (`spec_animalDealer`) and owned workshops (`ownWorkshop`) are excluded.
+- Two fulfillment methods: **pickup** and **delivery to the player** with a 2.5% surcharge (max. 5000). A phone-call fee of 10 applies when a seller is selected and their shop is opened via the **Call** button (charged immediately on the call).
+- Delivery spot validation: terrain sampled at 9 bounding-box points, height difference, slope, water, collisions, clearance from the player/vehicle.
+- Pallets are placed in a line (no overlap), using their real dimensions.
+- Purchase is confirmed by actual object creation (hooks on `VehicleLoadingData`/`PlaceableLoadingData`), not by catalog close and not by a finance event.
+- Order state machine; partial delivery is never reported as success; the delivery fee only counts recognized purchase types.
+- Centralized spawn-place restoration: idempotent, never overwrites other mods' changes.
+- Single-player only; multiplayer is disabled in `modDesc.xml`.
 
-## Управление
+## Controls
 
-| Клавиша | Действие (когда телефон открыт) |
+| Key | Action (phone open) |
 |---------|---------------------------------|
-| **O** | Открыть / закрыть телефон |
-| **↑ / ↓** | Выбрать поставщика |
-| **Enter** | Активировать элемент в фокусе |
-| **Tab** / **Shift+Tab** | Следующий / предыдущий интерактивный элемент |
-| **A** или **←** | Самовывоз |
-| **D** или **→** | Доставка к игроку |
-| **Backspace** | Закрыть телефон (назад) |
-| **Esc** | Закрыть телефон |
-| Колесо мыши | Прокрутка списка |
-| ЛКМ | Выбор магазина/способа, нажатие кнопок |
+| **O** | Open / close the phone |
+| **↑ / ↓** | Select a supplier |
+| **Enter** | Activate the focused element |
+| **Tab** / **Shift+Tab** | Next / previous interactive element |
+| **A** or **←** | Pickup |
+| **D** or **→** | Delivery to the player |
+| **Backspace** | Close the phone (back) |
+| **Esc** | Close the phone |
+| Mouse wheel | Scroll the list |
+| LMB | Select shop/method, press buttons |
 
-При открытии телефона фокус стоит на первой строке списка. После выбора магазина фокус переходит к способу получения, после способа — к кнопке вызова. Действие кнопки выполняется по отпусканию левой кнопки мыши, если курсор остался над ней.
+When the phone opens, focus is on the first list row. After selecting a shop, focus moves to the fulfillment method, then to the call button. The button action fires on left-button release if the cursor is still over it.
 
-> Если телефон открыт, управление персонажем и камерой заблокировано. Пока открыт каталог магазина FS25, клавиши телефона не перехватываются.
+> While the phone is open, player and camera input is locked. While the FS25 shop catalog is open, the phone keys are not intercepted.
 
-## Установка
+## Installation
 
-1. Скачайте готовый `.zip` из раздела **Releases** и положите его целиком в папку `mods` (не распаковывая).
-   - Windows: `Документы\My Games\FarmingSimulator2025\mods`
-2. Включите **Farm Phone** в списке модов сохранения.
-3. Нажмите **O** в игре.
-4. Убедитесь, что в `log.txt` нет ошибок загрузки XML/Lua.
+1. Download the ready `.zip` from **Releases** and place it as a whole into your `mods` folder (do not unpack).
+   - Windows: `Documents\My Games\FarmingSimulator2025\mods`
+2. Enable **Farm Shop Phone** in the savegame mod list.
+3. Press **O** in game.
+4. Make sure `log.txt` has no XML/Lua loading errors.
 
-## Сценарий заказа
+## Ordering flow
 
-1. Откройте телефон клавишей **O**.
-2. Выберите поставщика (**↑ / ↓** или клик).
-3. Выберите способ получения: самовывоз или доставка.
-4. Нажмите **Enter** — откроется оригинальный каталог выбранной точки.
-5. Купите товар в обычном каталоге игры.
-6. При самовывозе заберите товар в магазине. При доставке товар появится рядом с вами.
-7. После закрытия каталога временные изменения мест спавна отменяются.
+1. Open the phone with **O**.
+2. Select a supplier (**↑ / ↓** or click).
+3. Choose fulfillment: pickup or delivery.
+4. Press **Enter** — the original catalog of the selected point opens.
+5. Buy goods in the regular in-game catalog.
+6. Pick up the goods at the shop (pickup) or find them next to you (delivery).
+7. After the catalog closes, temporary spawn-place overrides are reverted.
 
-Если каталог закрыт без покупки, заказ не считается оформленным, плата за доставку не списывается.
+If the catalog is closed without a purchase, the order is not considered placed and the delivery fee is not charged.
 
-## Ограничения
+## Limitations
 
-1. Каталог остаётся общим для всех точек: мод не фильтрует ассортимент по выбранному магазину.
-2. Ручного выбора точки доставки на карте нет — доставка всегда к позиции игрока.
-3. Заказ завершается успехом только после завершения ВСЕХ его загрузок; факт покупки подтверждается реальным созданием объекта (хуки `VehicleLoadingData`/`PlaceableLoadingData`), привязанным к текущему заказу; закрытие каталога и финансовое событие сами по себе доказательством не являются.
-4. Проверка каждой палеты по отдельности (рельеф/коллизии конкретной позиции) пока не реализована: валидируется центральная точка доставки.
-5. Только одиночная игра.
+1. The catalog stays global for all points: the mod does not filter the assortment per selected shop.
+2. There is no manual delivery-point selection on the map — delivery always targets the player position.
+3. An order is completed successfully only after ALL of its loads finish; the purchase fact is confirmed by actual object creation (hooks on `VehicleLoadingData`/`PlaceableLoadingData`) bound to the current order; catalog close and finance events alone are not proof.
+4. Per-pallet validation (terrain/collisions for each exact position) is not implemented yet: only the central delivery point is validated.
+5. Single-player only.
 
-Полный журнал проверок: [docs/KNOWN_LIMITATIONS_RU.md](docs/KNOWN_LIMITATIONS_RU.md).
+Full check log: [docs/KNOWN_LIMITATIONS_RU.md](docs/KNOWN_LIMITATIONS_RU.md).

@@ -14,12 +14,12 @@
     <description>
         <en><![CDATA[Phone-style remote ordering from existing map shops in Farming Simulator 25.
 
-Open the phone overlay (key O), browse trading points detected automatically on the current map, choose pickup or delivery to your position with a 2.5% fee, and open the ORIGINAL shop interface of the selected store. The mod does not add its own catalog, change prices or the economy. Delivery is always to the player's position when the shop was opened; no manual map marker. Single-player only.
+Open the phone overlay (key O), browse trading points detected automatically on the current map, choose pickup or delivery to your position with a 2.5% fee, and open the ORIGINAL shop interface of the selected store. The mod does not add its own catalog, change prices or the economy. Delivery is always to the player's position when the shop was opened; no manual map marker. Single-player only. A 10-unit phone-call fee applies each time the selected store is opened.
 
 Store Deliveries was used only to study the spawn-place placement approach; its scripts and assets are NOT used as a dependency.]]></en>
         <ru><![CDATA[Удаленные покупки с существующих торговых точек карты через интерфейс телефона в Farming Simulator 25.
 
-Откройте телефонный оверлей (клавиша O), просмотрите торговые точки, найденные автоматически на текущей карте, выберите самовывоз или доставку к себе с доплатой 2,5% и откройте ОРИГИНАЛЬНЫй интерфейс выбранной точки. Мод не создаёт свой каталог, не меняет цены и экономику. Доставка всегда идёт к позиции игрока в момент вызова каталога — ручного выбора точки на карте нет. Только для одиночной игры.
+Откройте телефонный оверлей (клавиша O), просмотрите торговые точки, найденные автоматически на текущей карте, выберите самовывоз или доставку к себе с доплатой 2,5% и откройте ОРИГИНАЛЬНЫЙ интерфейс выбранной точки. Мод не создаёт свой каталог, не меняет цены и экономику. Доставка всегда идёт к позиции игрока в момент вызова каталога — ручного выбора точки на карте нет. Только для одиночной игры. За каждый вызов выбранного магазина взимается плата за звонок — 10.
 
 Store Deliveries использовался только для изучения подхода к размещению точки спавна; его скрипты и ресурсы не являются зависимостью мода и не подключаются.]]></ru>
     </description>
