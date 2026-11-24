@@ -1284,12 +1284,15 @@ function FarmShopPhone:getInteractiveElements()
     local lastIndex = math.min(#self.stores, firstIndex + ui.rows - 1)
     for i = firstIndex, lastIndex do
         local rowY = ui.listTop - (i - firstIndex + 1) * ui.rowH
+        -- Важно: копия индекса для замыкания, иначе все action могли бы
+        -- захватывать одно и то же значение переменной циклом.
+        local storeIndex = i
         table.insert(elements, {
-            id = "store_" .. i,
+            id = "store_" .. storeIndex,
             rect = {ui.listX, rowY, ui.listContentW, ui.rowH - 0.003},
             enabled = true,
             action = function(self)
-                self.selectedStore = i
+                self.selectedStore = storeIndex
                 self:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_SELECTED)
             end
         })
