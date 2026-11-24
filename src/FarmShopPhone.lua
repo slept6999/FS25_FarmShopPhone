@@ -656,6 +656,17 @@ function FarmShopPhone:discoverStores()
         end
     end
 
+    local function nearestNamedPlaceable(x, z, maxDist)
+        local bestName, bestDist = nil, maxDist
+        for _, info in ipairs(placeableNames) do
+            local dist = math.sqrt((info.x - x) ^ 2 + (info.z - z) ^ 2)
+            if dist < bestDist then
+                bestDist, bestName = dist, info.name
+            end
+        end
+        return bestName
+    end
+
     local function nearestHotspotName(x, z, maxDist)
         local bestName, bestDist = nil, maxDist
         for _, info in ipairs(hotspotNames) do
@@ -666,6 +677,9 @@ function FarmShopPhone:discoverStores()
         end
         return bestName
     end
+
+    -- Имена и позиции известных объектов карты — пригодятся для именования триггеров.
+    local placeableNames = {}
 
     -- Источник 1: установленные объекты карты. Только объекты с реально доступным
     -- интерфейсом покупки (activatable/sellingPoint/openShop).
@@ -680,6 +694,17 @@ function FarmShopPhone:discoverStores()
                 end
                 if name == nil or name == "" then
                     name = placeable.name or getText("FSP_STORE_UNKNOWN")
+                end
+
+                if name ~= nil and name ~= "" and name ~= getText("FSP_STORE_UNKNOWN") then
+                    local ppos = getPlaceablePosition(placeable)
+                    if ppos ~= nil then
+                        table.insert(placeableNames, {
+                            name = name,
+                            x = ppos.x,
+                            z = ppos.z
+                        })
+                    end
                 end
 
                 if mode == nil then
@@ -742,9 +767,11 @@ function FarmShopPhone:discoverStores()
             if node ~= nil and ok and x ~= nil then
                 local name = nearestHotspotName(x, z, 25.0)
                 if name == nil then
-                    -- Не теряем реальную точку из-за отсутствия маркера: даём имя с координатами.
-                    name = string.format("%s (%.0f, %.0f)", getText("FSP_STORE_UNKNOWN"), x, z)
-                    print(string.format("[FarmShopPhone][ShopDiscovery] Trigger without marker name, using fallback: %s", name))
+                    name = nearestNamedPlaceable(x, z, 25.0)
+                end
+                if name == nil then
+                    name = getText("FSP_STORE_GENERIC")
+                    print(string.format("[FarmShopPhone][ShopDiscovery] Trigger name not found, using generic name"))
                 end
 
                 addDiscoveredStore(self, {
@@ -812,8 +839,9 @@ function FarmShopPhone:verifyStoreAvailability()
             if store.hotspot.isDeleted ~= nil and store.hotspot.isDeleted then
                 dead = true
             end
-        elseif store.triggerNode ~= nil then
-            if store.triggerNode.isDeleted ~= nil and store.triggerNode.isDeleted then
+        elseif store.triggerObject ~= nil then
+            -- shopPlayerSpawn/rootNode могут быть числовыми id: проверяем сам триггер.
+            if store.triggerObject.isDeleted ~= nil and store.triggerObject.isDeleted then
                 dead = true
             end
         end

@@ -3,6 +3,7 @@
     <texts>
         <text name="input_FSP_OPEN_PHONE" text="Открыть «Фермерский телефон»" />
         <text name="FSP_STORE_UNKNOWN" text="Магазин без названия" />
+        <text name="FSP_STORE_GENERIC" text="Магазин" />
         <text name="FSP_NO_STORES" text="На этой карте не найдены подходящие значки магазинов" />
         <text name="FSP_DELIVERY_FEE" text="Плата за доставку" />
         <text name="FSP_UI_TITLE" text="ФЕРМЕРСКИЙ ТЕЛЕФОН" />
