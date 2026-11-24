@@ -8,7 +8,7 @@ Version **0.2.6.2**. The mod opens a phone overlay, automatically finds the trad
 - Only shops with a genuinely available purchase interface are discovered (`placeableSystem.placeables`, `mapHotspots` of type `SHOP`, `ShopTrigger`); `storeSpawnPlaces` is not used as a source.
 - De-duplication is by object reference, not by name/coordinates.
 - Points that accept bulk goods (`spec_sellingStation`), animal dealers (`spec_animalDealer`) and owned workshops (`ownWorkshop`) are excluded.
-- Two fulfillment methods: **pickup** and **delivery to the player** with a 2.5% surcharge (max. 5000). A phone-call fee of 10 applies when a seller is selected and their shop is opened via the **Call** button (charged immediately on the call; if the store cannot be opened, the call fee is refunded).
+- Two fulfillment methods: **pickup** and **delivery to the player** with a 2.5% surcharge (max. 5000). A phone-call fee of 10 applies when a seller is selected and their shop is opened via the **Call** button (charged only when the store opens successfully; if opening fails, nothing is charged).
 - Delivery spot validation: terrain sampled at 9 bounding-box points, height difference, slope, water, collisions, clearance from the player/vehicle.
 - Pallets are placed in a line (no overlap), using their real dimensions.
 - Purchase is confirmed by actual object creation (hooks on `VehicleLoadingData`/`PlaceableLoadingData`), not by catalog close and not by a finance event.
