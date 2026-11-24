@@ -1158,6 +1158,112 @@ function FarmShopPhone:drawCenteredText(value, x, y, w, h, size, r, g, b, a)
     setTextColor(1, 1, 1, 1)
 end
 
+--- Проверяет, безопасно ли доставлять товар в заданной точке.
+-- Возвращает true/false и строку ошибки.
+--- Показывает уведомление об ошибке доставки
+function FarmShopPhone:showDeliveryError(reason)
+    if g_currentMission ~= nil and g_currentMission.hud ~= nil then
+        local text = getText("FSP_DELIVERY_UNSAFE") .. " " .. (reason or "")
+        g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_CRITICAL, text, nil, GuiSoundPlayer.SOUND_SAMPLES.ERROR)
+    end
+end
+
+
+--- Пытается найти безопасное место доставки рядом с заданной точкой.
+-- Возвращает таблицу {x,y,z,rotX,rotY,rotZ,dirX,dirY,dirZ,dirPerpX,dirPerpY,dirPerpZ} или nil
+function FarmShopPhone:findSafeDeliveryLocation(origX, origY, origZ, origRot)
+    local mission = g_currentMission
+    if mission == nil or mission.terrainRootNode == nil then
+        return nil
+    end
+
+    local radius = FarmShopPhone.UI.deliveryCheckRadius or 3.0
+    local step = 1.0
+    local maxAttempts = 20
+    local ry = 0
+    local player = g_localPlayer
+    if player ~= nil and player.rootNode ~= nil then
+        local _, ry, _ = getWorldRotation(player.rootNode)
+    end
+
+    -- Список смещений для поиска (справа, слева, вперёд, назад, по диагоналям)
+    local offsets = {
+        {0, 0}, -- исходная точка (уже проверена)
+        {radius, 0}, {-radius, 0}, {0, radius}, {0, -radius},
+        {radius, radius}, {radius, -radius}, {-radius, radius}, {-radius, -radius},
+        {radius*1.5, 0}, {-radius*1.5, 0}, {0, radius*1.5}, {0, -radius*1.5},
+    }
+
+    for i, offset in ipairs(offsets) do
+        local x = origX + offset[1]
+        local z = origZ + offset[2]
+        local y = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, x, 0, z)
+
+        local safe, reason = self:isDeliveryLocationSafe(x, y, z)
+        if safe then
+            return {x, y, z, 0, 0, 0, 0, 0, 1, 1, 0, 0}
+        end
+    end
+
+    return nil
+end
+
+function FarmShopPhone:isDeliveryLocationSafe(x, y, z)
+    local mission = g_currentMission
+    if mission == nil or mission.terrainRootNode == nil then
+        return false, getText("FSP_DELIVERY_UNSAFE_GENERIC")
+    end
+
+    -- 1. Проверка воды через getWaterHeightAtWorldPos
+    if mission.getWaterHeightAtWorldPos ~= nil then
+        local waterY = mission.getWaterHeightAtWorldPos(x, y, z)
+        if waterY ~= nil and y <= waterY + 0.1 then
+            return false, getText("FSP_DELIVERY_WATER")
+        end
+    end
+
+    -- 2. Проверка наклона (terrain normal)
+    if getTerrainNormalAtWorldPos ~= nil then
+        local nx, ny, nz = getTerrainNormalAtWorldPos(mission.terrainRootNode, x, y, z)
+        local maxSlope = math.cos(math.rad(FarmShopPhone.UI.maxSlopeAngle or 20.0))
+        if ny < maxSlope then
+            return false, getText("FSP_DELIVERY_SLOPE")
+        end
+    end
+
+    -- 2.5. Дополнительная проверка воды
+    local terrainY = getTerrainHeightAtWorldPos(mission.terrainRootNode, x, 0, z)
+    if mission.getWaterHeightAtWorldPos ~= nil then
+        local waterY = mission.getWaterHeightAtWorldPos(x, y, z)
+        if waterY ~= nil and y <= waterY + 0.2 then
+            return false, getText("FSP_DELIVERY_WATER")
+        end
+    end
+
+    -- 3. Проверка коллизий в зоне доставки (overlapBox)
+    local radius = FarmShopPhone.UI.deliveryCheckRadius or 3.0
+    local halfSize = radius * 0.7
+    local ry = 0
+    local player = g_localPlayer
+    if player ~= nil and player.rootNode ~= nil then
+        local _, ry, _ = getWorldRotation(player.rootNode)
+    end
+
+    local halfSize = radius * 0.7
+    local found = overlapBox(x, y + 1.0, z, 0, ry, 0, halfSize, 2.0, halfSize, "dummyCallback", self, CollisionFlag.VEHICLE + CollisionFlag.DYNAMIC_OBJECT + CollisionFlag.STATIC_OBJECT, true, true, false, true)
+    if found then
+        return false, getText("FSP_DELIVERY_OBSTACLE")
+    end
+
+    -- 4. Проверка высоты над землей (minimum clearance)
+    local terrainY = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, x, 0, z)
+    if y - terrainY < (FarmShopPhone.UI.minClearanceHeight or 0.5) then
+        return false, getText("FSP_DELIVERY_CLEARANCE")
+    end
+
+    return true, nil
+end
+
 --- Иконка типа поставщика для строки списка.
 local function storeIconName(kind)
     if kind == "palletBuying" then
@@ -1399,6 +1505,23 @@ function FarmShopPhone:applyDeliverySpawnPlace(target)
         return false
     end
 
+    -- ПРОВЕРКА БЕЗОПАСНОСТИ: проверяем место доставки перед применением
+    local safe, reason = self:isDeliveryLocationSafe(target[1], target[2], target[3])
+    if not safe then
+        print("[FarmShopPhone] Delivery skipped: " .. (reason or "unsafe location"))
+        self:showDeliveryError(reason)
+        
+        -- Пытаемся найти безопасное место рядом
+        local safeTarget = self:findSafeDeliveryLocation(target[1], target[2], target[3], target)
+        if safeTarget ~= nil then
+            print("[FarmShopPhone] Found safe alternative delivery location")
+            self:showDeliverySuccess(getText("FSP_DELIVERY_FALLBACK"))
+            target = safeTarget
+        else
+            return false
+        end
+    end
+
     local place = g_currentMission.storeSpawnPlaces ~= nil and g_currentMission.storeSpawnPlaces[1] or nil
     if place == nil then
         print("[FarmShopPhone] Delivery skipped: no store spawn place on this map.")
@@ -1446,6 +1569,22 @@ end
 function FarmShopPhone:applyPalletSpawnPlaces(placeable, target)
     if placeable == nil or target == nil then
         return false
+    end
+
+    -- ПРОВЕРКА БЕЗОПАСНОСТИ для паллетной доставки
+    local safe, reason = self:isDeliveryLocationSafe(target[1], target[2], target[3])
+    if not safe then
+        print("[FarmShopPhone] Pallet delivery skipped: " .. (reason or "unsafe location"))
+        self:showDeliveryError(reason)
+        
+        -- Пытаемся найти безопасное место рядом
+        local safeTarget = self:findSafeDeliveryLocation(target[1], target[2], target[3], target)
+        if safeTarget ~= nil then
+            print("[FarmShopPhone] Found safe alternative delivery location for pallet")
+            target = safeTarget
+        else
+            return false
+        end
     end
 
     local spec = placeable.spec_palletBuyingStation

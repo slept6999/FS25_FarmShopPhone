@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <l10n>
     <texts>
         <text name="input_FSP_OPEN_PHONE" text="Открыть телефон магазинов" />
@@ -26,5 +26,5 @@
         <text name="FSP_DELIVERY_STEEP" text="Доставка невозможна: слишком крутой уклон" />
         <text name="FSP_DELIVERY_TOO_SMALL" text="Доставка невозможна: слишком близко к игроку или машине" />
         <text name="FSP_DELIVERY_OBSTRUCTED" text="Доставка невозможна: место занято" />
-    </texts>
+    <text name="FSP_DELIVERY_SLOPE" text="Слишком крутой склон" /><text name="FSP_DELIVERY_OBSTACLE" text="Обнаружено препятствие на месте доставки" /><text name="FSP_DELIVERY_CLEARANCE" text="Недостаточный зазор над землей" /><text name="FSP_DELIVERY_UNSAFE_GENERIC" text="Место доставки небезопасно" /><text name="FSP_DELIVERY_FALLBACK" text="Найдено безопасное альтернативное место доставки" /></texts>
 </l10n>
