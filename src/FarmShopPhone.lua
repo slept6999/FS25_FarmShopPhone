@@ -1,4 +1,4 @@
--------------------------------------------------------------------------------
+﻿-------------------------------------------------------------------------------
 -- FarmShopPhone — фермерский телефон для FS25 (Farm Shop Phone for FS25)
 --
 -- Version: 0.2.6.2
@@ -1319,8 +1319,6 @@ function FarmShopPhone:openShop()
         self:restoreSpawnPlaces()
     end
 
-    self:setOrderState(FarmShopPhone.ORDER_STATE.FULFILLMENT_SELECTED)
-
     -- При открытии каталога закрываем телефон, чтобы не блокировать ввод.
     self:closePhone()
 
@@ -2401,6 +2399,20 @@ function FarmShopPhone:unregisterPendingLoad(loadData)
     return false
 end
 
+--- Можно ли завершать заказ: каталог был открыт модом и уже закрыт.
+function FarmShopPhone:canSettleOrder()
+    if self.orderSettled or not self.orderActive then
+        return false
+    end
+    if not self.catalogOpenedByUs then
+        return false
+    end
+    if g_gui ~= nil and g_gui.getIsGuiVisible ~= nil and g_gui:getIsGuiVisible() then
+        return false
+    end
+    return true
+end
+
 --- Вызывается после завершения каждой зарегистрированной загрузки.
 function FarmShopPhone:onPendingLoadFinished()
     -- Неудача размещения и все загрузки завершены: безопасно завершаем заказ ошибкой.
@@ -2410,9 +2422,11 @@ function FarmShopPhone:onPendingLoadFinished()
         return
     end
 
-    -- Покупка подтверждена, загрузок больше нет: можно завершать успешный заказ.
+    -- Покупка подтверждена, загрузок больше нет: завершаем заказ,
+    -- но только после закрытия каталога (чтобы уведомления не шли поверх него).
     if FarmShopPhone.purchaseConfirmed and self.orderActive and not self.orderSettled
-            and (self.pendingLoadCount or 0) <= 0 and self.deliveryFailure == nil then
+            and (self.pendingLoadCount or 0) <= 0 and self.deliveryFailure == nil
+            and self:canSettleOrder() then
         self:finalizeOrderSuccess()
     end
 end
@@ -3020,7 +3034,7 @@ function FarmShopPhone:update(dt)
     self:processRestoreTimer(dt)
 
     -- Страховочный таймаут ожидания загрузок: не дождались — не заявляем успешную доставку.
-    if self.pendingWaitTimer > 0 and not self.orderSettled then
+    if self.pendingWaitTimer > 0 and not self.orderSettled and self:canSettleOrder() then
         self.pendingWaitTimer = self.pendingWaitTimer - dt
         if self.pendingWaitTimer <= 0 then
             self.pendingWaitTimer = 0
