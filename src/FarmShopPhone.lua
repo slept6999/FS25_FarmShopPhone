@@ -1,7 +1,7 @@
 ﻿-------------------------------------------------------------------------------
 -- FarmShopPhone — фермерский телефон для FS25 (Farm Shop Phone for FS25)
 --
--- Version: 0.2.6.2
+-- Version: 0.2.6.3
 --
 -- Назначение: через телефонный оверлей звонить на торговые точки карты,
 -- открывать стандартный каталог магазина, выбирать самовывоз или разовую
@@ -187,10 +187,8 @@ FarmShopPhone.evidenceObjects = 0       -- сколько объектов со�
 FarmShopPhone.evidenceSpent = 0         -- сумма списаний в рамках заказа (для платы за доставку)
 FarmShopPhone.pendingLoads = {}         -- loading data, запущенные внутри заказа (токен -> заказ)
 FarmShopPhone.pendingLoadCount = 0      -- сколько таких загрузок ещё не завершилось
-FarmShopPhone.pendingWaitTimer = 0
+FarmShopPhone.pendingWaitTimer = 0      -- страховочный таймаут ожидания загрузок перед завершением заказа
 FarmShopPhone.chargeVerifyPending = nil -- отложенная проверка списания (асинхронный баланс)
-FarmShopPhone.DEBUG_SHOP_CONTEXT = true   -- временно: дамп контекста ShopMenu для исследования
-FarmShopPhone.TRIGGER_OPEN_MODE = "no_teleport" -- "vanilla" | "no_teleport": как открывать ShopTrigger      -- страховочный таймаут ожидания загрузок перед завершением заказа
 FarmShopPhone.patchedSpawners = {}      -- palletSpawner'ы, чьи места подменял мод
 FarmShopPhone.deliveryFailure = nil     -- причина неудачи размещения ("no_space", ...)
 FarmShopPhone.deliveryPartial = false   -- часть товара не удалось разместить
@@ -234,90 +232,6 @@ FarmShopPhone.palletDeliveryApplied = false
 --- Возвращает локализованную строку по имени ключа из modDesc.xml (секция <l10n>).
 local function getText(name)
     return g_i18n:getText(name)
-end
-
---- Отладочный дамп контекста ShopMenu (временно, для исследования пустого каталога).
-local function debugDumpShopMenuContext(store)
-    if not FarmShopPhone.DEBUG_SHOP_CONTEXT then
-        return
-    end
-
-    print(string.format("[FarmShopPhone][UI][Debug] dump ShopMenu context for: %s (mode=%s)",
-        tostring(store.name), tostring(store.openMode)))
-    print("[FarmShopPhone][UI][Debug] ShopMenu class type: " .. type(ShopMenu))
-
-    local targets = {}
-    if g_gui ~= nil and g_gui.screenControllers ~= nil and ShopMenu ~= nil then
-        targets["screenController"] = g_gui.screenControllers[ShopMenu]
-    end
-    if g_currentMission ~= nil then
-        targets["mission.shopMenu"] = g_currentMission.shopMenu
-    end
-    targets["g_shopMenu"] = rawget(_G, "g_shopMenu")
-
-    for label, obj in pairs(targets) do
-        if obj == nil then
-            print("[FarmShopPhone][UI][Debug] " .. label .. " = nil")
-        else
-            local keys = {}
-            for k, v in pairs(obj) do
-                keys[#keys + 1] = tostring(k) .. "=" .. type(v)
-                if #keys >= 60 then break end
-            end
-            print(string.format("[FarmShopPhone][UI][Debug] %s fields (%s): %s",
-                label, type(obj), table.concat(keys, ", ")))
-            local mt = getmetatable(obj)
-            if mt ~= nil then
-                local mkeys = {}
-                for k, v in pairs(mt) do
-                    mkeys[#mkeys + 1] = tostring(k) .. "=" .. type(v)
-                    if #mkeys >= 60 then break end
-                end
-                print(string.format("[FarmShopPhone][UI][Debug] %s metatable: %s",
-                    label, table.concat(mkeys, ", ")))
-            end
-        end
-    end
-end
-
---- Безопасно возвращает число элементов списка каталога, если поле доступно.
-local function debugCatalogCount(container)
-    if type(container) ~= "table" then
-        return -1
-    end
-    for _, key in ipairs({"itemsList", "elements", "listItems"}) do
-        local value = rawget(container, key)
-        if type(value) == "table" then
-            return #value
-        end
-    end
-    return -1
-end
-
---- Состояние ShopMenu после открытия (временная диагностика).
-local function debugShopMenuState(tag)
-    if not FarmShopPhone.DEBUG_SHOP_CONTEXT then
-        return
-    end
-
-    local sm = nil
-    if g_currentMission ~= nil then
-        sm = g_currentMission.shopMenu
-    end
-    if sm == nil and g_gui ~= nil and g_gui.screenControllers ~= nil and ShopMenu ~= nil then
-        sm = g_gui.screenControllers[ShopMenu]
-    end
-    if sm == nil then
-        print("[FarmShopPhone][UI][Debug] " .. tag .. ": ShopMenu controller = nil")
-        return
-    end
-
-    local candidates = { "shopMenu", "currentPage", "pageShopItems", "pageShopItemDetails" }
-    for _, key in ipairs(candidates) do
-        local obj = rawget(sm, key)
-        print(string.format("[FarmShopPhone][UI][Debug] %s.%s = %s, items=%d",
-            tag, key, tostring(obj ~= nil), debugCatalogCount(obj)))
-    end
 end
 
 --- Расстояние, на которое переместился игрок (для диагностики телепорта).
@@ -1020,7 +934,6 @@ function FarmShopPhone:resetOrderContext()
     self.deliverySize = nil
     self.orderStoreName = nil
     self.debugPlayerBefore = nil
-    self.debugCatalogTimer = nil
     FarmShopPhone.chargeVerifyPending = nil
 end
 
@@ -1292,25 +1205,21 @@ function FarmShopPhone:openStoreInterface(store)
             if trigger ~= nil and (trigger == store.triggerObject
                     or trigger.shopPlayerSpawn == store.triggerNode
                     or trigger.rootNode == store.triggerNode) then
-                if FarmShopPhone.TRIGGER_OPEN_MODE == "no_teleport" then
-                    -- Исследовательский режим: штатный ShopMenu без ванильного телепорта игрока.
-                    if g_gui == nil or ShopMenu == nil then
-                        print("[FarmShopPhone][UI] no_teleport: g_gui/ShopMenu недоступны.")
-                        return false
-                    end
-                    local okNav, errNav = pcall(function()
-                        g_gui:changeScreen(nil, ShopMenu)
-                    end)
-                    if not okNav then
-                        print("[FarmShopPhone][UI] no_teleport: changeScreen failed: " .. tostring(errNav))
-                        return false
-                    end
-                    print("[FarmShopPhone][UI] no_teleport: ShopMenu changeScreen выполнен без телепорта.")
-                    return true
+                -- Штатный ShopMenu напрямую, без ванильной телепортации игрока к точке
+                -- (подтверждено игровым тестом: каталог наполняется, позиция не меняется).
+                if g_gui == nil or ShopMenu == nil then
+                    print("[FarmShopPhone][UI] ShopMenu недоступен.")
+                    return false
                 end
-                if callMethodSafe(trigger, "openShop") then
-                    return true
+                local okNav, errNav = pcall(function()
+                    g_gui:changeScreen(nil, ShopMenu)
+                end)
+                if not okNav then
+                    print("[FarmShopPhone][UI] changeScreen(ShopMenu) failed: " .. tostring(errNav))
+                    return false
                 end
+                print("[FarmShopPhone][UI] ShopMenu открыт без телепорта.")
+                return true
             end
         end
         return false
@@ -1428,8 +1337,6 @@ function FarmShopPhone:openShop()
         self:restoreSpawnPlaces()
     end
 
-    debugDumpShopMenuContext(store)
-
     -- Запоминаем позицию игрока до открытия (диагностика телепортации).
     self.debugPlayerBefore = nil
     if g_localPlayer ~= nil and g_localPlayer.rootNode ~= nil then
@@ -1467,9 +1374,6 @@ function FarmShopPhone:openShop()
     print(string.format("[FarmShopPhone][UI] Store interface opened: name=%s kind=%s mode=%s placeable=%s playerDistance=%.1f playerTeleported=%s",
         tostring(store.name), tostring(store.kind), tostring(store.openMode),
         store.placeable ~= nil and "yes" or "no", moved, tostring(moved > 1.0)))
-
-    debugShopMenuState("after-open")
-    self.debugCatalogTimer = 1000
 
     -- Телефонный звонок состоялся: точка открыта успешно — только теперь списываем плату.
     local feeOk, feeCharged, feeReason = pcall(FarmShopPhone.chargeCallFee, FarmShopPhone)
@@ -3138,15 +3042,6 @@ function FarmShopPhone:update(dt)
 
     -- Отложенный возврат мест спавна после появления объектов.
     self:processRestoreTimer(dt)
-
-    -- Повторный замер каталога после открытия (диагностика пустого списка).
-    if self.debugCatalogTimer ~= nil and self.debugCatalogTimer > 0 then
-        self.debugCatalogTimer = self.debugCatalogTimer - dt
-        if self.debugCatalogTimer <= 0 then
-            self.debugCatalogTimer = nil
-            debugShopMenuState("after-1s")
-        end
-    end
 
     -- Страховочный таймаут ожидания загрузок: не дождались — не заявляем успешную доставку.
     if self.pendingWaitTimer > 0 and not self.orderSettled and self:canSettleOrder() then

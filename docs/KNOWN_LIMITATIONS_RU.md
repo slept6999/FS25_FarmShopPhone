@@ -1,6 +1,6 @@
 # Журнал ограничений и проверок — Фермерский телефон (FS25)
 
-Версия актуализации: **0.2.6.2** (опубликовано на GitHub: `v0.2.6.2`).
+Версия актуализации: **0.2.6.3** (опубликовано на GitHub: `v0.2.6.3`).
 
 ## Состояние проверки
 
@@ -22,6 +22,8 @@
    Исключаются `spec_sellingStation`, `spec_animalDealer`, собственные мастерские.
    `spec_buyingStation`/`getBuyingStation` НЕ считаются магазинами покупки — это станции
    продажи/приёмки (`BuyingStation` наследует `LoadingStation`).
+   `spec_workshop` (пункт продажи/ремонта техники, `VehicleSellingPoint:openMenu()` →
+   `WorkshopScreen`) тоже исключён: это не каталог покупок.
    `canOpenInterface` выставляется только после проверки реального интерфейса (`getStoreOpenMode`).
 2. **Машина состояний заказа** (`ORDER_STATE`): IDLE, SHOP_SELECTED, FULFILLMENT_SELECTED,
    SHOP_OPENING, SHOP_OPEN, PURCHASE_PENDING, PURCHASE_CONFIRMED, DELIVERY_PENDING,
@@ -47,10 +49,12 @@
    Неудачное списание сохраняется в `unpaidFee` и погашается следующим успешным заказом.
    Плата за звонок — 10, списывается только после успешного открытия точки.
    При выгрузке карты комиссия не списывается, а сохраняется долгом.
-9. **Открытие магазина** — только интерфейс выбранной точки; общего fallback на `ShopMenu`
-   нет: если открыть не удалось, плата за звонок не списывается,
-   заказ отменяется (`FSP_STORE_OPEN_FAILED`). Закрытие каталога учитывается только
-   для каталога, открытого модом (`catalogOpenedByUs`).
+9. **Открытие магазина** — только интерфейс выбранной точки; общего fallback на чужой
+   `ShopMenu` нет. Если точку открыть не удалось — плата за звонок не списывается,
+   заказ отменяется (`FSP_STORE_OPEN_FAILED`). Триггерные точки открываются через
+   `g_gui:changeScreen(nil, ShopMenu)` **без** ванильной телепортации игрока
+   (проверено на картах mapUS и Hof Bergmann: каталог наполняется).
+   Закрытие каталога учитывается только для каталога, открытого модом (`catalogOpenedByUs`).
 10. **Интерфейс** — состояния normal/hover/pressed/selected/disabled/focused,
     фокус по TAB, активация по Enter, ESC/Backspace, блокировка управления игроком.
 11. **Логирование** — префиксы `[FarmShopPhone][ShopDiscovery|UI|Input|Order|Purchase|Delivery|SpawnRestore]`.

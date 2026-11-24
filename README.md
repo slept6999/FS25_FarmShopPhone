@@ -1,6 +1,6 @@
 # Farm Shop Phone for FS25
 
-Version **0.2.6.2**. The mod opens a phone overlay, automatically finds the trading points of the loaded map and lets you enter the standard FS25 shop interface. It adds no buildings, NPCs or assortment and does not change prices or the economy. Store Deliveries was used only as a reference for the approach; its scripts and assets are not loaded.
+Version **0.2.6.3**. The mod opens a phone overlay, automatically finds the trading points of the loaded map and lets you enter the standard FS25 shop interface. It adds no buildings, NPCs or assortment and does not change prices or the economy. Store Deliveries was used only as a reference for the approach; its scripts and assets are not loaded.
 
 ## Features
 
@@ -14,6 +14,7 @@ Version **0.2.6.2**. The mod opens a phone overlay, automatically finds the trad
 - Purchase is confirmed by actual object creation (hooks on `VehicleLoadingData`/`PlaceableLoadingData`), not by catalog close and not by a finance event.
 - Order state machine; partial delivery is never reported as success; the delivery fee only counts recognized purchase types.
 - Centralized spawn-place restoration: idempotent, never overwrites other mods' changes.
+- Trigger-based shops open the vanilla catalog without teleporting the player.
 - Single-player only; multiplayer is disabled in `modDesc.xml`.
 
 ## Controls
