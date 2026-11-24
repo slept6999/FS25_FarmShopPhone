@@ -1292,6 +1292,13 @@ function FarmShopPhone:openShop()
     self.lastRestoreConflict = false
     self:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_OPENING)
 
+    -- Телефонный звонок: выбор продавца и открытие его магазина по кнопке «Позвонить».
+    -- Плата списывается сразу при нажатии «Позвонить», до попытки открытия каталога.
+    local feeOk, feeCharged, feeReason = pcall(FarmShopPhone.chargeCallFee, FarmShopPhone)
+    if not feeOk or feeCharged == false then
+        print("[FarmShopPhone][Order] Плата за звонок не списана: " .. tostring(feeOk and feeReason or feeCharged))
+    end
+
     -- Если предыдущий заказ ещё не завершён, сначала возвращаем места спавна.
     if self:isSpawnOverrideActive() then
         self:restoreSpawnPlaces()
@@ -1372,12 +1379,6 @@ function FarmShopPhone:openShop()
             self:abortOrder("shop interface open failed")
             return false
         end
-    end
-
-    -- Плата за телефонный звонок (открытие магазина через телефон), один раз на заказ.
-    local feeOk, feeCharged, feeReason = pcall(FarmShopPhone.chargeCallFee, FarmShopPhone)
-    if not feeOk or feeCharged == false then
-        print("[FarmShopPhone][Order] Плата за звонок не списана: " .. tostring(feeOk and feeReason or feeCharged))
     end
 
     self.orderActive = true
