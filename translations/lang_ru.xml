@@ -1,12 +1,12 @@
 <?xml version='1.0' encoding='utf-8'?>
 <l10n>
     <texts>
-        <text name="input_FSP_OPEN_PHONE" text="Открыть телефон магазинов" />
+        <text name="input_FSP_OPEN_PHONE" text="Открыть фермерского телефона" />
         <text name="FSP_STORE_UNKNOWN" text="Магазин без названия" />
         <text name="FSP_NO_STORES" text="На этой карте не найдены подходящие значки магазинов" />
         <text name="FSP_STANDARD_STORE" text="Стандартный магазин" />
         <text name="FSP_DELIVERY_FEE" text="Плата за доставку" />
-        <text name="FSP_UI_TITLE" text="ТЕЛЕФОН ФЕРМЫ" />
+        <text name="FSP_UI_TITLE" text="ФЕРМЕРСКИЙ ТЕЛЕФОН" />
         <text name="FSP_UI_SUBTITLE" text="Удалённый доступ к магазинам" />
         <text name="FSP_UI_SHOPS" text="ПОСТАВЩИКИ" />
         <text name="FSP_UI_FULFILLMENT" text="СПОСОБ ПОЛУЧЕНИЯ" />
