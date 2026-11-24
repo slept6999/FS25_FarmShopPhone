@@ -22,6 +22,7 @@
         <text name="FSP_DELIVERY_TOO_SMALL" text="Delivery unavailable: not enough clearance from player" />
         <text name="FSP_DELIVERY_OBSTRUCTED" text="Delivery unavailable: area is occupied" />
         <text name="FSP_DELIVERY_FAILED" text="Delivery failed" />
+        <text name="FSP_STORE_OPEN_FAILED" text="Could not open the selected store interface; order cancelled" />
         <text name="FSP_DELIVERY_DONE" text="Delivery complete. Goods placed near you" />
         <text name="FSP_CALL_FEE" text="Phone call fee" />
         <text name="FSP_DELIVERY_PARTIAL" text="Delivery partially failed: some goods could not be placed" />

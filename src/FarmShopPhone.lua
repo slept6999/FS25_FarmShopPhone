@@ -7,23 +7,26 @@
 --
 -- Архитектура:
 --   1. discoverStores()   — многоступенчатое обнаружение торговых точек:
---      placeableSystem.placeables, mapHotspots типа SHOP, ShopTrigger и
---      резервный storeSpawnPlaces. Дедупликация по ссылке на объект, а не по
---      названию/координатам. Точки приёма сыпучих товаров, животные и собственные
---      мастерские отфильтровываются по специализациям.
+--      placeableSystem.placeables, mapHotspots типа SHOP и ShopTrigger.
+--      Дедупликация по ссылке на объект, а не по названию/координатам. Точки
+--      приёма сыпучих товаров, животные и собственные мастерские
+--      отфильтровываются по специализациям.
 --   2. drawPhone()        — отрисовывает оверлей со списком поставщиков, способом
 --      получения и кнопкой вызова; состояния normal/hover/pressed/selected/
 --      disabled/focused.
 --   3. openShop()         — открывает штатный интерфейс выбранной точки
 --      (VehicleShopDialog, паллетный магазин, WorkshopScreen) либо стандартный
---      ShopMenu для торговых точек-триггеров (ShopTrigger).
+--      ShopMenu для торговых точек-триггеров (ShopTrigger). Общего fallback
+--      на чужой ShopMenu нет: если точку открыть не удалось, заказ отменяется.
 --   4. Машина состояний заказа (ORDER_STATE): переходы только по подтверждённым
---      событиям; факт покупки фиксируется реальным списанием через
---      FarmStats.changeFinanceStats, а не закрытием каталога.
+--      событиям; факт покупки фиксируется реальным созданием объекта
+--      (VehicleLoadingData/PlaceableLoadingData), а не закрытием каталога.
+--      Финансовые события используются только для расчёта платы за доставку.
 --   5. Доставка            — по образцу Store Deliveries: места спавна временно
 --      переносятся в безопасную точку рядом с игроком (централизованный
---      beginSpawnOverride/apply/restore), плата 2.5% списывается при закрытии
---      каталога. Паллеты размещаются линией без наложения.
+--      beginSpawnOverride/apply/restore). Заказ завершается успехом только после
+--      завершения ВСЕХ его загрузок; плата 2.5% списывается при успешном
+--      завершении, а при выгрузке карты — сохраняется как долг.
 --
 -- Ограничения: каталог остаётся общим (ассортимент не фильтруется по точке);
 -- размещение подтверждается реальным созданием объекта через хуки
@@ -186,6 +189,7 @@ FarmShopPhone.evidenceObjects = 0       -- сколько объектов со�
 FarmShopPhone.evidenceSpent = 0         -- сумма списаний в рамках заказа (для платы за доставку)
 FarmShopPhone.pendingLoads = {}         -- loading data, запущенные внутри заказа (токен -> заказ)
 FarmShopPhone.pendingLoadCount = 0      -- сколько таких загрузок ещё не завершилось
+FarmShopPhone.pendingWaitTimer = 0      -- страховочный таймаут ожидания загрузок перед завершением заказа
 FarmShopPhone.patchedSpawners = {}      -- palletSpawner'ы, чьи места подменял мод
 FarmShopPhone.deliveryFailure = nil     -- причина неудачи размещения ("no_space", ...)
 FarmShopPhone.deliveryPartial = false   -- часть товара не удалось разместить
@@ -397,9 +401,21 @@ function FarmShopPhone:deleteMap()
     self.stores = {}
     FarmShopPhone.shopTriggers = {}
 
-    -- Возвращаем места спавна и списываем накопленную плату за доставку
+    -- Возвращаем места спавна и безопасно завершаем незавершённый заказ.
+    -- Выгрузка карты сама по себе НЕ инициирует списание комиссии.
+    self.restoreTimer = 0
+    self.pendingWaitTimer = 0
     self:restoreSpawnPlaces()
-    self:chargeDeliveryFee()
+    if FarmShopPhone.purchaseConfirmed and self.fulfillment == "delivery" and self.deliveryFailure == nil then
+    -- Заказ фактически успешен, но списывать при выгрузке нельзя: сохраняем долг,
+    -- он будет погашен при следующем успешном заказе (chargeUnpaidFee).
+        local total = self.evidenceSpent or 0
+        local fee = self:computeDeliveryFee(total)
+        if fee > 0 then
+            FarmShopPhone.unpaidFee = (FarmShopPhone.unpaidFee or 0) + fee
+            print("[FarmShopPhone][Delivery] Комиссия не списана при выгрузке; сохранена как долг: " .. fee)
+        end
+    end
     self:resetOrderContext()
 
     -- Разблокируем движение при выгрузке карты
@@ -917,6 +933,7 @@ function FarmShopPhone:resetOrderContext()
     self.evidenceSpent = 0
     self.pendingLoads = {}
     self.pendingLoadCount = 0
+    self.pendingWaitTimer = 0
     self.patchedSpawners = {}
     self.callFeeCharged = false
     self.deliveryFailure = nil
@@ -1285,6 +1302,7 @@ function FarmShopPhone:openShop()
     self.evidenceSpent = 0
     self.pendingLoads = {}
     self.pendingLoadCount = 0
+    self.pendingWaitTimer = 0
     self.patchedSpawners = {}
     self.callFeeCharged = false
     self.deliveryFailure = nil
@@ -1365,20 +1383,12 @@ function FarmShopPhone:openShop()
     end
 
     if not opened then
-        -- Резерв: стандартный каталог игры (если точка не дала собственный интерфейс).
-        if ShopMenu == nil then
-            print("[FarmShopPhone][UI] ShopMenu is unavailable.")
-            self:abortOrder("shop interface unavailable")
-            return false
-        end
-        local okMenu, errMenu = pcall(function()
-            g_gui:changeScreen(nil, ShopMenu)
-        end)
-        if not okMenu then
-            print("[FarmShopPhone][UI] Failed to open shop screen: " .. tostring(errMenu))
-            self:abortOrder("shop interface open failed")
-            return false
-        end
+        -- Резервного перехода на общий ShopMenu нет: иначе игрок может купить
+        -- в чужой торговой точке вместо выбранной. Отменяем подготовку заказа.
+        print("[FarmShopPhone][UI] Store interface could not be opened.")
+        self:notifyOrderResult("delivery", getText("FSP_STORE_OPEN_FAILED"))
+        self:abortOrder("shop_interface_unavailable")
+        return false
     end
 
     self.orderActive = true
@@ -2441,11 +2451,17 @@ end
 
 --- Вызывается после завершения каждой зарегистрированной загрузки.
 function FarmShopPhone:onPendingLoadFinished()
-    -- Если размещение уже завершилось ошибкой, а загрузки только что кончились —
-    -- теперь можно безопасно завершить заказ как ошибочный.
-    if self.deliveryFailure ~= nil and not FarmShopPhone.purchaseConfirmed
-            and self.orderActive and not self.orderSettled and (self.pendingLoadCount or 0) <= 0 then
+    -- Неудача размещения и все загрузки завершены: безопасно завершаем заказ ошибкой.
+    if self.deliveryFailure ~= nil and self.orderActive and not self.orderSettled
+            and (self.pendingLoadCount or 0) <= 0 then
         self:settleDeliveryFailure()
+        return
+    end
+
+    -- Покупка подтверждена, загрузок больше нет: можно завершать успешный заказ.
+    if FarmShopPhone.purchaseConfirmed and self.orderActive and not self.orderSettled
+            and (self.pendingLoadCount or 0) <= 0 and self.deliveryFailure == nil then
+        self:finalizeOrderSuccess()
     end
 end
 
@@ -2468,14 +2484,17 @@ function FarmShopPhone:installPurchaseHooks()
     if VehicleLoadingData ~= nil and VehicleLoadingData.load ~= nil then
         local originalLoad = VehicleLoadingData.load
         VehicleLoadingData.load = function(self, callback, callbackTarget, callbackArguments)
-            -- Связываем операцию загрузки с текущим заказом (если она началась внутри него).
+            -- Связываем операцию загрузки с заказом, активным на момент её старта.
+            local belongsToOrder = false
+            local loadToken = FarmShopPhone.orderToken
             if FarmShopPhone.orderActive and not FarmShopPhone.orderSettled then
                 FarmShopPhone:registerPendingLoad(self)
+                belongsToOrder = true
             end
 
             local wrapped = function(cbTarget, objects, loadingState, cbArgs)
-                if loadingState == VehicleLoadingState.OK and objects ~= nil and #objects > 0
-                        and FarmShopPhone:isPendingLoadOfCurrentOrder(self) then
+                if belongsToOrder and loadToken == FarmShopPhone.orderToken
+                        and loadingState == VehicleLoadingState.OK and objects ~= nil and #objects > 0 then
                     local ok = pcall(FarmShopPhone.onOrderObjectsCreated, FarmShopPhone, objects)
                     if not ok then
                         print("[FarmShopPhone][Purchase] ERROR in object-creation handler")
@@ -2484,8 +2503,10 @@ function FarmShopPhone:installPurchaseHooks()
                 if callback ~= nil then
                     callback(cbTarget, objects, loadingState, cbArgs)
                 end
-                FarmShopPhone:unregisterPendingLoad(self)
-                FarmShopPhone:onPendingLoadFinished()
+                if belongsToOrder then
+                    FarmShopPhone:unregisterPendingLoad(self)
+                    FarmShopPhone:onPendingLoadFinished()
+                end
             end
             return originalLoad(self, wrapped, callbackTarget, callbackArguments)
         end
@@ -2496,23 +2517,43 @@ function FarmShopPhone:installPurchaseHooks()
     if PlaceableLoadingData ~= nil and PlaceableLoadingData.load ~= nil then
         local originalLoad = PlaceableLoadingData.load
         PlaceableLoadingData.load = function(self, callback, callbackTarget, callbackArguments)
+            local belongsToOrder = false
+            local loadToken = FarmShopPhone.orderToken
             if FarmShopPhone.orderActive and not FarmShopPhone.orderSettled then
                 FarmShopPhone:registerPendingLoad(self)
+                belongsToOrder = true
             end
 
-            local wrapped = function(cbTarget, placeable, loadingState, cbArgs)
-                if loadingState == PlaceableLoadingState.OK and placeable ~= nil
-                        and FarmShopPhone:isPendingLoadOfCurrentOrder(self) then
-                    local ok = pcall(FarmShopPhone.onOrderObjectsCreated, FarmShopPhone, {placeable})
-                    if not ok then
-                        print("[FarmShopPhone][Purchase] ERROR in object-creation handler")
+            local wrapped = function(cbTarget, result, loadingState, cbArgs)
+                if belongsToOrder and loadToken == FarmShopPhone.orderToken then
+                    -- Движок может передать один объект или таблицу — приводим к списку.
+                    local list = {}
+                    if type(result) == "table" then
+                        for _, item in ipairs(result) do
+                            table.insert(list, item)
+                        end
+                        if #list == 0 and next(result) ~= nil then
+                            table.insert(list, result)
+                        end
+                    elseif result ~= nil then
+                        table.insert(list, result)
+                    end
+
+                    local okState = (loadingState == nil) or (loadingState == PlaceableLoadingState.OK)
+                    if okState and #list > 0 then
+                        local ok = pcall(FarmShopPhone.onOrderObjectsCreated, FarmShopPhone, list)
+                        if not ok then
+                            print("[FarmShopPhone][Purchase] ERROR in object-creation handler")
+                        end
                     end
                 end
                 if callback ~= nil then
-                    callback(cbTarget, placeable, loadingState, cbArgs)
+                    callback(cbTarget, result, loadingState, cbArgs)
                 end
-                FarmShopPhone:unregisterPendingLoad(self)
-                FarmShopPhone:onPendingLoadFinished()
+                if belongsToOrder then
+                    FarmShopPhone:unregisterPendingLoad(self)
+                    FarmShopPhone:onPendingLoadFinished()
+                end
             end
             return originalLoad(self, wrapped, callbackTarget, callbackArguments)
         end
@@ -2522,7 +2563,11 @@ function FarmShopPhone:installPurchaseHooks()
     -- Паллеты: неудача поиска места (только для спавнеров, чьи места подменял мод).
     if PalletSpawner ~= nil and PalletSpawner.onSpawnSearchFinished ~= nil and Utils ~= nil then
         PalletSpawner.onSpawnSearchFinished = Utils.appendedFunction(PalletSpawner.onSpawnSearchFinished, function(self, location)
-            if location == nil and FarmShopPhone.patchedSpawners[self] then
+            if location == nil and FarmShopPhone.patchedSpawners[self]
+                    and FarmShopPhone.orderActive and not FarmShopPhone.orderSettled
+                    and FarmShopPhone.fulfillment == "delivery" then
+                -- Ошибка относится к паллетному спавнеру, подменённому для текущего
+                -- заказа доставки. Посторонние вызовы состояние не меняют.
                 FarmShopPhone:onDeliveryPlacementFailed("no_space")
             end
         end)
@@ -2565,44 +2610,55 @@ function FarmShopPhone:onOrderObjectsCreated(objects)
 end
 
 --- Завершает заказ после закрытия каталога.
+-- Успех подтверждается только при завершении ВСЕХ загрузок заказа:
+-- иначе часть товара могла ещё не появиться.
 function FarmShopPhone:finalizeOrderSuccess()
     if self.orderSettled then
         return
     end
+
+    -- Полная или частичная неудача размещения: успех не показываем, плату не списываем.
+    if self.fulfillment == "delivery" and self.deliveryFailure ~= nil then
+        if (self.pendingLoadCount or 0) > 0 then
+            -- Дадим незавершённым загрузкам создать объекты, чтобы не потерять товар.
+            print("[FarmShopPhone][Delivery] Размещение не удалось, но есть незавершённые загрузки — ожидание.")
+            return
+        end
+        self:settleDeliveryFailure()
+        return
+    end
+
+    if (self.pendingLoadCount or 0) > 0 then
+        if (self.pendingWaitTimer or 0) <= 0 then
+            self.pendingWaitTimer = 15000
+            print("[FarmShopPhone][Order] Ожидание завершения загрузок объектов...")
+        end
+        return
+    end
+
     self.orderSettled = true
     self.settleTimer = 0
+    self.pendingWaitTimer = 0
 
     if self.fulfillment == "delivery" then
-        -- Полная или частичная неудача размещения: успех не показываем, плату не списываем.
-        if self.deliveryFailure ~= nil then
-            self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_FAILED)
-            self.restoreTimer = 0
-            self:restoreSpawnPlaces()
-            FarmShopPhone.deliveryTotalCharges = 0
-            FarmShopPhone.deliveryFarmId = nil
-            self:notifyDeliveryError(self.deliveryPartial and "FSP_DELIVERY_PARTIAL" or "FSP_DELIVERY_FAILED")
-            print(string.format("[FarmShopPhone][Delivery] Заказ завершён ошибкой размещения (частично=%s, причина=%s)",
-                tostring(self.deliveryPartial), tostring(self.deliveryFailure)))
-        else
-            -- Сначала погашаем прежнюю неоплаченную комиссию (если она была).
-            local unpaidOk, unpaidResult = pcall(FarmShopPhone.chargeUnpaidFee, FarmShopPhone)
-            if not unpaidOk then
-                print("[FarmShopPhone][Delivery] Ошибка Lua при списании прежнего долга: " .. tostring(unpaidResult))
-            end
-
-            -- Результат списания платы проверяем явно.
-            local okCall, charged, reason = pcall(FarmShopPhone.chargeDeliveryFee, FarmShopPhone)
-            if not okCall then
-                print("[FarmShopPhone][Delivery] Ошибка Lua при списании платы: " .. tostring(charged))
-                self:notifyOrderResult("delivery", getText("FSP_DELIVERY_FEE_FAILED"))
-            elseif charged == false then
-                print("[FarmShopPhone][Delivery] WARNING: плата за доставку не списана (" .. tostring(reason) .. "); сумма сохранена как долг.")
-                self:notifyOrderResult("delivery", getText("FSP_DELIVERY_FEE_FAILED"))
-            else
-                self:notifyOrderResult("delivery")
-            end
-            self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_COMPLETED)
+        -- Сначала погашаем прежнюю неоплаченную комиссию (если она была).
+        local unpaidOk, unpaidResult = pcall(FarmShopPhone.chargeUnpaidFee, FarmShopPhone)
+        if not unpaidOk then
+            print("[FarmShopPhone][Delivery] Ошибка Lua при списании прежнего долга: " .. tostring(unpaidResult))
         end
+
+        -- Результат списания платы проверяем явно.
+        local okCall, charged, reason = pcall(FarmShopPhone.chargeDeliveryFee, FarmShopPhone)
+        if not okCall then
+            print("[FarmShopPhone][Delivery] Ошибка Lua при списании платы: " .. tostring(charged))
+            self:notifyOrderResult("delivery", getText("FSP_DELIVERY_FEE_FAILED"))
+        elseif charged == false then
+            print("[FarmShopPhone][Delivery] WARNING: плата за доставку не списана (" .. tostring(reason) .. "); сумма сохранена как долг.")
+            self:notifyOrderResult("delivery", getText("FSP_DELIVERY_FEE_FAILED"))
+        else
+            self:notifyOrderResult("delivery")
+        end
+        self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_COMPLETED)
     else
         self:restoreSpawnPlaces()
         self:setOrderState(FarmShopPhone.ORDER_STATE.COMPLETED)
@@ -2616,6 +2672,17 @@ function FarmShopPhone:finalizeOrderSuccess()
     if g_localPlayer ~= nil then
         g_localPlayer.isControlEnabled = true
     end
+end
+
+--- Страховочный таймаут ожидания загрузок: не дождались — не заявляем успешную доставку.
+function FarmShopPhone:settleDeliveryInconclusive()
+    if self.orderSettled or not FarmShopPhone.purchaseConfirmed then
+        return
+    end
+
+    print("[FarmShopPhone][Delivery] Не удалось дождаться завершения загрузок — заказ закрыт как ошибочный.")
+    self.deliveryFailure = self.deliveryFailure or "loads_timeout"
+    self:settleDeliveryFailure()
 end
 
 --- Неудача размещения купленного товара.
@@ -2717,6 +2784,28 @@ function FarmShopPhone:computeDeliveryFee(total)
     return fee
 end
 
+--- Списание с проверкой фактического результата по балансу фермы.
+-- Отсутствие Lua-ошибки не доказывает списание: при недостатке средств
+-- или недоступности API баланс может остаться прежним.
+function FarmShopPhone:withChargeVerification(farmId, chargeFn)
+    local farm = g_farmManager ~= nil and g_farmManager:getFarmById(farmId) or nil
+    local balanceBefore = (farm ~= nil and farm.getBalance ~= nil) and farm:getBalance() or nil
+
+    local okCall, err = pcall(chargeFn)
+    if not okCall then
+        return false, tostring(err)
+    end
+
+    if balanceBefore ~= nil then
+        local balanceAfter = farm:getBalance()
+        if balanceAfter == balanceBefore then
+            return false, "balance_unchanged"
+        end
+    end
+
+    return true, nil
+end
+
 --- Списывает накопленную плату за доставку (2.5% от суммы покупок).
 -- Возвращает: charged(boolean), reason("charged" | "nothing_to_charge" | "not_confirmed" | "charge_error").
 -- При ошибке списания сумма сохраняется в unpaidFee и будет списана позже.
@@ -2745,11 +2834,13 @@ function FarmShopPhone:chargeDeliveryFee()
         return false, "charge_error"
     end
 
-    local okCall, err = pcall(g_currentMission.addMoney, g_currentMission, -fee, farmId, MoneyType.OTHER)
-    if not okCall then
+    local chargedOk, chargeErr = self:withChargeVerification(farmId, function()
+        g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
+    end)
+    if not chargedOk then
         FarmShopPhone.unpaidFee = (FarmShopPhone.unpaidFee or 0) + fee
         FarmShopPhone.unpaidFeeFarmId = FarmShopPhone.unpaidFeeFarmId or farmId
-        print("[FarmShopPhone][Delivery] ERROR списания платы: " .. tostring(err) .. " — сумма сохранена как долг.")
+        print("[FarmShopPhone][Delivery] ERROR списания платы: " .. tostring(chargeErr) .. " — сумма сохранена как долг.")
         return false, "charge_error"
     end
 
@@ -2782,9 +2873,11 @@ function FarmShopPhone:chargeUnpaidFee()
         return false, "no_mission"
     end
 
-    local okCall, err = pcall(g_currentMission.addMoney, g_currentMission, -fee, farmId, MoneyType.OTHER)
-    if not okCall then
-        print("[FarmShopPhone][Delivery] ERROR списания прежнего долга: " .. tostring(err))
+    local chargedOk, chargeErr = self:withChargeVerification(farmId, function()
+        g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
+    end)
+    if not chargedOk then
+        print("[FarmShopPhone][Delivery] ERROR списания прежнего долга: " .. tostring(chargeErr))
         return false, "error"
     end
 
@@ -2816,9 +2909,11 @@ function FarmShopPhone:chargeCallFee()
         return false, "no_mission"
     end
 
-    local okCall, err = pcall(g_currentMission.addMoney, g_currentMission, -fee, farmId, MoneyType.OTHER)
-    if not okCall then
-        print("[FarmShopPhone][Order] ERROR списания платы за звонок: " .. tostring(err))
+    local chargedOk, chargeErr = self:withChargeVerification(farmId, function()
+        g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
+    end)
+    if not chargedOk then
+        print("[FarmShopPhone][Order] ERROR списания платы за звонок: " .. tostring(chargeErr))
         return false, "error"
     end
 
@@ -2900,6 +2995,15 @@ function FarmShopPhone:update(dt)
 
     -- Отложенный возврат мест спавна после появления объектов.
     self:processRestoreTimer(dt)
+
+    -- Страховочный таймаут ожидания загрузок: не дождались — не заявляем успешную доставку.
+    if self.pendingWaitTimer > 0 and not self.orderSettled then
+        self.pendingWaitTimer = self.pendingWaitTimer - dt
+        if self.pendingWaitTimer <= 0 then
+            self.pendingWaitTimer = 0
+            self:settleDeliveryInconclusive()
+        end
+    end
 
     -- Периодическая проверка доступности выбранных магазинов (каждые 5 секунд)
     if self.storeAvailabilityTimer == nil then
