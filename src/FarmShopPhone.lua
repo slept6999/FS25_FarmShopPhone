@@ -87,7 +87,6 @@ FarmShopPhone.DELIVERY_SAFETY = {
 
 
 -- Имя мода, под которым загружен скрипт (необходимо для g_currentModName).
-FarmShopPhone.MOD_NAME = g_currentModName
 FarmShopPhone.MOD_DIRECTORY = g_currentModDirectory or ''
 
 
@@ -2466,11 +2465,6 @@ function FarmShopPhone:onPendingLoadFinished()
 end
 
 --- true, если загрузка была запущена именно в рамках текущего заказа.
-function FarmShopPhone:isPendingLoadOfCurrentOrder(loadData)
-    return self.pendingLoads ~= nil
-        and self.pendingLoads[loadData] == FarmShopPhone.orderToken
-end
-
 --- Устанавливает хуки на классы загрузки FS25: покупка подтверждается только
 -- при фактическом создании объекта (VehicleLoadingData/PlaceableLoadingData),
 -- а не по финансовому событию.
