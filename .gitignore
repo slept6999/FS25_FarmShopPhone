@@ -1,16 +1,25 @@
-# В репозиторий попадает только чистый мод.
-*
-
-!.gitignore
-!modDesc.xml
-!icon_FarmShopPhone.dds
-!src/
-!src/**
-!translations/
-!translations/**
-!ui/
-!ui/textures/
-!ui/textures/**
-
-# Инструкция для переводчиков — не нужна игре
+# Всё, что НЕ является модом (Obsidian, отчёты, исходники UI, документация проекта)
+.obsidian/
+00 - MOC/
+00 - MOC */
+10 - Knowledge/
+20 - Projects/
+30 - Resources/
+90 - Archive/
+docs/
+README.md
+README_RU.md
+README хранилища.md
+PROJECT_CONTEXT.md
+ui/FarmShopPhone_UI_Kit/
+ui/FarmShopPhone_UI_Kit.zip
+ui/tools/
 translations/README.md
+
+# Логи и временные файлы
+log.txt
+*.log
+*.tmp
+*.bak
+__pycache__/
+*.pyc
