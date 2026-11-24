@@ -656,6 +656,9 @@ function FarmShopPhone:discoverStores()
         end
     end
 
+    -- Имена и позиции известных объектов карты — пригодятся для именования триггеров.
+    local placeableNames = {}
+
     local function nearestNamedPlaceable(x, z, maxDist)
         local bestName, bestDist = nil, maxDist
         for _, info in ipairs(placeableNames) do
@@ -678,11 +681,8 @@ function FarmShopPhone:discoverStores()
         return bestName
     end
 
-    -- Имена и позиции известных объектов карты — пригодятся для именования триггеров.
-    local placeableNames = {}
-
     -- Источник 1: установленные объекты карты. Только объекты с реально доступным
-    -- интерфейсом покупки (activatable/sellingPoint/openShop).
+    -- интерфейсом покупки (vehicleBuying/palletBuying).
     if mission.placeableSystem ~= nil and mission.placeableSystem.placeables ~= nil then
         for _, placeable in ipairs(mission.placeableSystem.placeables) do
             if placeable ~= nil then
