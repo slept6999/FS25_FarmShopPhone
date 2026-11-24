@@ -27,6 +27,29 @@
 
 FarmShopPhone = {}
 
+
+-- Переменные для отслеживания покупки и доставки
+FarmShopPhone.purchaseConfirmed = false
+FarmShopPhone.pendingDelivery = false
+FarmShopPhone.lastKnownFinanceStats = nil
+FarmShopPhone.deliveryValidationFailed = false
+FarmShopPhone.deliveryTotalCharges = 0
+FarmShopPhone.deliveryFarmId = nil
+FarmShopPhone.deliveryRate = 0.025
+FarmShopPhone.deliveryMaxCharge = 5000
+
+-- Константы для проверки безопасности доставки
+FarmShopPhone.DELIVERY_SAFETY = {
+    defaultSize = { width = 2.5, height = 1.0, length = 3.0 },
+    maxHeightDiff = 0.5,
+    maxSlopeDeg = 8.0,
+    maxScoreDistance = 20.0,
+    radii = { 3, 5, 8 },
+    directions = 8,
+    minPlayerClearance = 3.0,
+}
+
+
 -- Имя мода, под которым загружен скрипт (необходимо для g_currentModName).
 FarmShopPhone.MOD_NAME = g_currentModName
 FarmShopPhone.MOD_DIRECTORY = g_currentModDirectory or ''
@@ -711,20 +734,27 @@ end
 -- итоговую проверку всё равно выполняет placementManager движка.
 function FarmShopPhone:deliveryCollisionFree(x, y, z, size)
     if overlapBox == nil or CollisionFlag == nil then
-        return true
+        self:logValidation("deliveryCollisionFree: overlapBox or CollisionFlag unavailable")
+        return false  -- FAIL-SAFE: если API недоступно, считаем место небезопасным
     end
 
     local mask = (CollisionFlag.VEHICLE or 0) + (CollisionFlag.DYNAMIC_OBJECT or 0)
             + (CollisionFlag.STATIC_OBJECT or 0) + (CollisionFlag.BUILDING or 0)
             + (CollisionFlag.TREE or 0) + (CollisionFlag.WATER or 0)
     if mask == 0 then
-        return true
+        self:logValidation("deliveryCollisionFree: collision mask is zero")
+        return false
     end
 
     self.deliveryOverlapHit = false
-    pcall(overlapBox, x, y, z, 0, 0, 0,
+    local ok, err = pcall(overlapBox, x, y, z, 0, 0, 0,
         size.width * 0.5, size.height * 0.5, size.length * 0.5,
         "deliveryOverlapCallback", self, mask, true, true, false, true)
+    
+    if not ok then
+        self:logValidation("deliveryCollisionFree: overlapBox failed: " .. tostring(err))
+        return false  -- FAIL-SAFE
+    end
 
     return not self.deliveryOverlapHit
 end
@@ -982,9 +1012,13 @@ function FarmShopPhone:openShop()
 
     if not opened then
         -- Резерв: стандартный каталог игры для точек без собственного интерфейса.
-        if ShopMenu == nil then
-            print("[FarmShopPhone] ShopMenu class is not available.")
-            return
+        -- Устанавливаем выбранный магазин перед открытием
+        if ShopMenu ~= nil and self.stores[self.selectedStore] ~= nil then
+            local store = self.stores[self.selectedStore]
+            -- Пытаемся передать выбранный магазин в ShopMenu
+            if ShopMenu.setCurrentStore ~= nil then
+                ShopMenu.setCurrentStore(store)
+            end
         end
         g_gui:changeScreen(nil, ShopMenu)
     end
@@ -1209,59 +1243,20 @@ function FarmShopPhone:findSafeDeliveryLocation(origX, origY, origZ, origRot)
 end
 
 function FarmShopPhone:isDeliveryLocationSafe(x, y, z)
-    local mission = g_currentMission
-    if mission == nil or mission.terrainRootNode == nil then
-        return false, getText("FSP_DELIVERY_UNSAFE_GENERIC")
+    -- Используем единую систему валидации через validateDeliveryArea
+    local size = FarmShopPhone.DELIVERY_SAFETY.defaultSize
+    local ok, reason, _, _ = self:validateDeliveryArea({x, 0, z}, size)
+    if not ok then
+        return false, reason or getText("FSP_DELIVERY_UNSAFE_GENERIC")
     end
-
-    -- 1. Проверка воды через getWaterHeightAtWorldPos
-    if mission.getWaterHeightAtWorldPos ~= nil then
-        local waterY = mission.getWaterHeightAtWorldPos(x, y, z)
-        if waterY ~= nil and y <= waterY + 0.1 then
-            return false, getText("FSP_DELIVERY_WATER")
-        end
-    end
-
-    -- 2. Проверка наклона (terrain normal)
-    if getTerrainNormalAtWorldPos ~= nil then
-        local nx, ny, nz = getTerrainNormalAtWorldPos(mission.terrainRootNode, x, y, z)
-        local maxSlope = math.cos(math.rad(FarmShopPhone.UI.maxSlopeAngle or 20.0))
-        if ny < maxSlope then
-            return false, getText("FSP_DELIVERY_SLOPE")
-        end
-    end
-
-    -- 2.5. Дополнительная проверка воды
-    local terrainY = getTerrainHeightAtWorldPos(mission.terrainRootNode, x, 0, z)
-    if mission.getWaterHeightAtWorldPos ~= nil then
-        local waterY = mission.getWaterHeightAtWorldPos(x, y, z)
-        if waterY ~= nil and y <= waterY + 0.2 then
-            return false, getText("FSP_DELIVERY_WATER")
-        end
-    end
-
-    -- 3. Проверка коллизий в зоне доставки (overlapBox)
-    local radius = FarmShopPhone.UI.deliveryCheckRadius or 3.0
-    local halfSize = radius * 0.7
-    local ry = 0
-    local player = g_localPlayer
-    if player ~= nil and player.rootNode ~= nil then
-        local _, ry, _ = getWorldRotation(player.rootNode)
-    end
-
-    local halfSize = radius * 0.7
-    local found = overlapBox(x, y + 1.0, z, 0, ry, 0, halfSize, 2.0, halfSize, "dummyCallback", self, CollisionFlag.VEHICLE + CollisionFlag.DYNAMIC_OBJECT + CollisionFlag.STATIC_OBJECT, true, true, false, true)
-    if found then
-        return false, getText("FSP_DELIVERY_OBSTACLE")
-    end
-
-    -- 4. Проверка высоты над землей (minimum clearance)
-    local terrainY = getTerrainHeightAtWorldPos(g_currentMission.terrainRootNode, x, 0, z)
-    if y - terrainY < (FarmShopPhone.UI.minClearanceHeight or 0.5) then
-        return false, getText("FSP_DELIVERY_CLEARANCE")
-    end
-
     return true, nil
+end
+
+-- Alias для обратной совместимости (если где-то вызывается напрямую)
+function FarmShopPhone:deliveryCollisionFree(x, y, z, size)
+    -- Делегируем к новой системе валидации
+    local safe, reason = self:isDeliveryLocationSafe(x, y, z)
+    return safe
 end
 
 --- Иконка типа поставщика для строки списка.
@@ -1625,7 +1620,10 @@ function FarmShopPhone:applyPalletSpawnPlaces(placeable, target)
         })
     end
 
-    for _, place in ipairs(places) do
+    -- Распределяем паллеты по доступным местам спавна (по одному на место)
+    local maxPallets = math.min(#places, 10)  -- макс 10 паллет за раз
+    for i = 1, maxPallets do
+        local place = places[i]
         place.startX, place.startY, place.startZ = target[1], target[2], target[3]
         if target.rotX ~= nil then
             place.rotX, place.rotY, place.rotZ = target.rotX, target.rotY, target.rotZ
@@ -1633,10 +1631,19 @@ function FarmShopPhone:applyPalletSpawnPlaces(placeable, target)
             place.dirPerpX, place.dirPerpY, place.dirPerpZ =
                 target.dirPerpX, target.dirPerpY, target.dirPerpZ
         end
+        -- Небольшой рандомизированный сдвиг для избежания идеального наложения
+        local offset = 0.3
+        place.startX = place.startX + (math.random() - 0.5) * offset
+        place.startZ = place.startZ + (math.random() - 0.5) * offset
+    end
+
+    -- Остальные места оставляем нетронутыми (восстановятся при restore)
+    for i = maxPallets + 1, #places do
+        -- оставляем как есть
     end
 
     self.palletDeliveryApplied = true
-    print(string.format("[FarmShopPhone] Pallet delivery point applied: X=%.1f Z=%.1f", target[1], target[3]))
+    print(string.format("[FarmShopPhone] Pallet delivery point applied: X=%.1f Z=%.1f (pallets: %d)", target[1], target[3], maxPallets))
     return true
 end
 
@@ -1738,6 +1745,9 @@ function FarmShopPhone:handleFinanceStats(amount, statType)
         end
         FarmShopPhone.deliveryTotalCharges = FarmShopPhone.deliveryTotalCharges + charge
         FarmShopPhone.deliveryFarmId = g_currentMission:getFarmId()
+        FarmShopPhone.purchaseConfirmed = true
+        FarmShopPhone.pendingDelivery = true
+        FarmShopPhone.lastKnownFinanceStats = statType
         print(string.format("[FarmShopPhone] Delivery fee +%.2f (pending %.2f)", charge, FarmShopPhone.deliveryTotalCharges))
     end
 end
@@ -1800,10 +1810,23 @@ function FarmShopPhone:update(dt)
             self.orderActive = false
             self.shopWasVisible = false
             self.callPosition = nil
-            -- Возвращаем места спавна и списываем плату за доставку
+            -- Возвращаем места спавна
             self:restoreSpawnPlaceToOriginal()
             self:schedulePalletRestore(1.5)
-            self:chargeDeliveryFee()
+            
+            -- Списываем плату за доставку ТОЛЬКО если покупка подтверждена
+            if FarmShopPhone.purchaseConfirmed and FarmShopPhone.pendingDelivery then
+                FarmShopPhone:chargeDeliveryFee()
+            else
+                FarmShopPhone.deliveryTotalCharges = 0
+                FarmShopPhone.deliveryFarmId = nil
+                FarmShopPhone:logValidation("delivery fee not charged: no confirmed purchase")
+            end
+            
+            -- Сбрасываем флаги покупки
+            FarmShopPhone.purchaseConfirmed = false
+            FarmShopPhone.pendingDelivery = false
+            FarmShopPhone.lastKnownFinanceStats = nil
 
             -- Разблокируем движение после закрытия каталога
             if g_localPlayer ~= nil then
