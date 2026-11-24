@@ -1,5 +1,7 @@
-﻿-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 -- FarmShopPhone — фермерский телефон для FS25 (Farm Shop Phone for FS25)
+--
+-- Version: 0.2.6.2
 --
 -- Назначение: через телефонный оверлей звонить на торговые точки карты,
 -- открывать стандартный каталог магазина, выбирать самовывоз или разовую
@@ -56,15 +58,12 @@ FarmShopPhone.orderState = FarmShopPhone.ORDER_STATE.IDLE
 FarmShopPhone.orderToken = 0
 
 -- Конфигурация поведения.
-FarmShopPhone.USE_POSITION_FREEZE = false  -- при false полагаемся на штатный lock ввода FS25
 FarmShopPhone.SETTLE_TIMEOUT_MS = 4000     -- окно ожидания реального создания объекта после закрытия каталога
 FarmShopPhone.RESTORE_DEBOUNCE_MS = 2000   -- пауза после последнего созданного объекта перед возвратом мест спавна
 
 -- Признаки покупки и доставки (единый источник истины — только здесь).
 FarmShopPhone.purchaseConfirmed = false
 FarmShopPhone.pendingDelivery = false
-FarmShopPhone.lastKnownFinanceStats = nil
-FarmShopPhone.deliveryValidationFailed = false
 FarmShopPhone.deliveryTotalCharges = 0
 FarmShopPhone.deliveryFarmId = nil
 FarmShopPhone.deliveryRate = 0.025
@@ -188,7 +187,8 @@ FarmShopPhone.evidenceObjects = 0       -- сколько объектов со�
 FarmShopPhone.evidenceSpent = 0         -- сумма списаний в рамках заказа (для платы за доставку)
 FarmShopPhone.pendingLoads = {}         -- loading data, запущенные внутри заказа (токен -> заказ)
 FarmShopPhone.pendingLoadCount = 0      -- сколько таких загрузок ещё не завершилось
-FarmShopPhone.pendingWaitTimer = 0      -- страховочный таймаут ожидания загрузок перед завершением заказа
+FarmShopPhone.pendingWaitTimer = 0
+FarmShopPhone.chargeVerifyPending = nil -- отложенная проверка списания (асинхронный баланс)      -- страховочный таймаут ожидания загрузок перед завершением заказа
 FarmShopPhone.patchedSpawners = {}      -- palletSpawner'ы, чьи места подменял мод
 FarmShopPhone.deliveryFailure = nil     -- причина неудачи размещения ("no_space", ...)
 FarmShopPhone.deliveryPartial = false   -- часть товара не удалось разместить
@@ -241,43 +241,6 @@ local function getPlayerPosition()
         return nil
     end
     return {getWorldTranslation(g_localPlayer.rootNode)}
-end
-
---- Сохраняет позицию и поворот игрока для заморозки на время открытого телефона.
-function FarmShopPhone:freezePlayerPosition()
-    self.frozenPosition = nil
-    self.frozenRotation = nil
-
-    if g_localPlayer == nil or g_localPlayer.rootNode == nil then
-        return
-    end
-
-    self.frozenPosition = {getWorldTranslation(g_localPlayer.rootNode)}
-    self.frozenRotation = {getWorldRotation(g_localPlayer.rootNode)}
-end
-
---- Возвращает игрока в замороженную позицию (вызывается каждый кадр при открытом телефоне).
-function FarmShopPhone:applyFrozenPosition()
-    if not FarmShopPhone.USE_POSITION_FREEZE then
-        return
-    end
-    if not self.phoneOpen or g_localPlayer == nil or g_localPlayer.rootNode == nil then
-        return
-    end
-
-    if self.frozenPosition ~= nil then
-        setWorldTranslation(g_localPlayer.rootNode, self.frozenPosition[1], self.frozenPosition[2], self.frozenPosition[3])
-    end
-
-    if self.frozenRotation ~= nil then
-        setWorldRotation(g_localPlayer.rootNode, self.frozenRotation[1], self.frozenRotation[2], self.frozenRotation[3])
-    end
-end
-
---- Снимает заморозку позиции игрока.
-function FarmShopPhone:unfreezePlayerPosition()
-    self.frozenPosition = nil
-    self.frozenRotation = nil
 end
 
 --- Блокирует ввод игрока (движение, обзор) и показывает курсор, пока открыт телефон.
@@ -421,8 +384,6 @@ function FarmShopPhone:deleteMap()
     if g_localPlayer ~= nil then
         g_localPlayer.isControlEnabled = true
     end
-    -- Снимаем заморозку и блокировку ввода при выгрузке карты
-    self:unfreezePlayerPosition()
     self:unlockPlayerInput()
 end
 
@@ -806,8 +767,6 @@ function FarmShopPhone:openPhone()
         if g_localPlayer ~= nil then
             g_localPlayer.isControlEnabled = true
         end
-        -- Снимаем заморозку и блокировку ввода при toggle-закрытии
-        self:unfreezePlayerPosition()
         self:unlockPlayerInput()
         return
     end
@@ -836,9 +795,6 @@ function FarmShopPhone:openPhone()
 
     -- Блокируем движение персонажа при открытом телефоне.
     if g_localPlayer ~= nil then
-        if FarmShopPhone.USE_POSITION_FREEZE then
-            self:freezePlayerPosition()
-        end
         g_localPlayer.isControlEnabled = false
     end
 
@@ -854,8 +810,7 @@ function FarmShopPhone:closePhone()
     if g_localPlayer ~= nil then
         g_localPlayer.isControlEnabled = true
     end
-    -- Снимаем заморозку персонажа и блокировку ввода
-    self:unfreezePlayerPosition()
+    -- Снимаем блокировку ввода
     self:unlockPlayerInput()
 end
 
@@ -921,10 +876,9 @@ function FarmShopPhone:resetOrderContext()
     FarmShopPhone.orderState = FarmShopPhone.ORDER_STATE.IDLE
     FarmShopPhone.purchaseConfirmed = false
     FarmShopPhone.pendingDelivery = false
-    FarmShopPhone.lastKnownFinanceStats = nil
-    FarmShopPhone.deliveryValidationFailed = false
     self.orderActive = false
     self.shopWasVisible = false
+    self.catalogOpenedByUs = false
     self.orderSettled = true
     self.settleTimer = 0
     self.restoreTimer = 0
@@ -944,6 +898,7 @@ function FarmShopPhone:resetOrderContext()
     self.deliveryTarget = nil
     self.deliverySize = nil
     self.orderStoreName = nil
+    FarmShopPhone.chargeVerifyPending = nil
 end
 
 --- Очищает временное состояние при выгрузке миссии.
@@ -1166,7 +1121,6 @@ end
 
 --- Проверка этапа A: подготовить безопасную точку перед открытием каталога.
 function FarmShopPhone:prepareDeliveryTarget(store, size)
-    self.deliveryValidationFailed = false
 
     if store ~= nil and store.kind == "palletBuying" and store.placeable ~= nil then
         local spec = store.placeable.spec_palletBuyingStation
@@ -1193,7 +1147,6 @@ function FarmShopPhone:prepareDeliveryTarget(store, size)
     self.deliveryTarget = self:findSafeDeliveryTarget(size)
 
     if self.deliveryTarget == nil then
-        self.deliveryValidationFailed = true
         self:notifyDeliveryError("FSP_DELIVERY_UNSAFE")
         return false
     end
@@ -1290,10 +1243,10 @@ function FarmShopPhone:openShop()
     FarmShopPhone.orderToken = FarmShopPhone.orderToken + 1
     FarmShopPhone.purchaseConfirmed = false
     FarmShopPhone.pendingDelivery = false
-    FarmShopPhone.lastKnownFinanceStats = nil
     FarmShopPhone.deliveryTotalCharges = 0
     FarmShopPhone.deliveryFarmId = nil
     self.shopWasVisible = false
+    self.catalogOpenedByUs = false
     self.orderSettled = false
     self.settleTimer = 0
     self.restoreTimer = 0
@@ -1333,7 +1286,7 @@ function FarmShopPhone:openShop()
         local target = self.deliveryTarget
         local applied = false
 
-        -- Паллетные магазины спавнят товар через собственный PalletSpawner.
+        -- Паллетные магазины создают товар через собственный PalletSpawner.
         if store.kind == "palletBuying" and store.placeable ~= nil then
             local ok, result = pcall(function()
                 return self:applyPalletSpawnPlaces(store.placeable, target)
@@ -1385,11 +1338,14 @@ function FarmShopPhone:openShop()
         -- Резервного перехода на общий ShopMenu нет: иначе игрок может купить
         -- в чужой торговой точке вместо выбранной. Отменяем подготовку заказа.
         print("[FarmShopPhone][UI] Store interface could not be opened.")
+        -- Звонок не удался: возвращаем плату за вызов, чтобы игрок не платил за неработающую точку.
+        self:refundCallFee()
         self:notifyOrderResult("delivery", getText("FSP_STORE_OPEN_FAILED"))
         self:abortOrder("shop_interface_unavailable")
         return false
     end
 
+    self.catalogOpenedByUs = true
     self.orderActive = true
     if self.fulfillment == "delivery" then
         self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_PENDING)
@@ -1827,9 +1783,6 @@ function FarmShopPhone:isDeliveryLocationSafe(x, y, z, size)
     return true, nil
 end
 
--- Примечание: отдельный alias deliveryCollisionFree удалён — он перекрывал
--- одноимённую проверку через overlapBox и вызывал бесконечную рекурсию.
-
 --- Иконка типа поставщика для строки списка.
 local function storeIconName(kind)
     if kind == "palletBuying" then
@@ -2232,7 +2185,7 @@ function FarmShopPhone:restoreSpawnPlaceToOriginal()
 end
 
 --- Переносит места спавна паллет паллетной станции в точку доставки.
--- Паллетные магазины спавнят товар через собственный PalletSpawner станции,
+-- Паллетные магазины создают товар через собственный PalletSpawner станции,
 -- а не через общий storeSpawnPlaces, поэтому подменяются именно его места.
 function FarmShopPhone:applyPalletSpawnPlaces(placeable, target)
     if placeable == nil or target == nil then
@@ -2475,8 +2428,10 @@ function FarmShopPhone:installPurchaseHooks()
     self.purchaseHooksInstalled = true
 
     -- Транспорт и паллеты (паллеты тоже загружаются через VehicleLoadingData).
-    if VehicleLoadingData ~= nil and VehicleLoadingData.load ~= nil then
+    if VehicleLoadingData ~= nil and VehicleLoadingData.load ~= nil
+            and VehicleLoadingState ~= nil and VehicleLoadingState.OK ~= nil then
         local originalLoad = VehicleLoadingData.load
+        local vehicleOkState = VehicleLoadingState.OK
         VehicleLoadingData.load = function(self, callback, callbackTarget, callbackArguments)
             -- Связываем операцию загрузки с заказом, активным на момент её старта.
             local belongsToOrder = false
@@ -2488,7 +2443,7 @@ function FarmShopPhone:installPurchaseHooks()
 
             local wrapped = function(cbTarget, objects, loadingState, cbArgs)
                 if belongsToOrder and loadToken == FarmShopPhone.orderToken
-                        and loadingState == VehicleLoadingState.OK and objects ~= nil and #objects > 0 then
+                        and loadingState == vehicleOkState and objects ~= nil and #objects > 0 then
                     local ok = pcall(FarmShopPhone.onOrderObjectsCreated, FarmShopPhone, objects)
                     if not ok then
                         print("[FarmShopPhone][Purchase] ERROR in object-creation handler")
@@ -2508,8 +2463,10 @@ function FarmShopPhone:installPurchaseHooks()
     end
 
     -- Объекты (строения и производства).
-    if PlaceableLoadingData ~= nil and PlaceableLoadingData.load ~= nil then
+    if PlaceableLoadingData ~= nil and PlaceableLoadingData.load ~= nil
+            and PlaceableLoadingState ~= nil and PlaceableLoadingState.OK ~= nil then
         local originalLoad = PlaceableLoadingData.load
+        local placeableOkState = PlaceableLoadingState.OK
         PlaceableLoadingData.load = function(self, callback, callbackTarget, callbackArguments)
             local belongsToOrder = false
             local loadToken = FarmShopPhone.orderToken
@@ -2533,7 +2490,7 @@ function FarmShopPhone:installPurchaseHooks()
                         table.insert(list, result)
                     end
 
-                    local okState = (loadingState == nil) or (loadingState == PlaceableLoadingState.OK)
+                    local okState = (loadingState == nil) or (loadingState == placeableOkState)
                     if okState and #list > 0 then
                         local ok = pcall(FarmShopPhone.onOrderObjectsCreated, FarmShopPhone, list)
                         if not ok then
@@ -2589,7 +2546,6 @@ function FarmShopPhone:onOrderObjectsCreated(objects)
 
     self.evidenceObjects = self.evidenceObjects + count
     FarmShopPhone.purchaseConfirmed = true
-    FarmShopPhone.lastKnownFinanceStats = "objects_created"
     self:setOrderState(FarmShopPhone.ORDER_STATE.PURCHASE_PENDING)
     self:setOrderState(FarmShopPhone.ORDER_STATE.PURCHASE_CONFIRMED)
 
@@ -2733,7 +2689,14 @@ end
 -- Факт покупки НЕ определяется по финансовому событию (ТЗ §5). В расчёт платы
 -- включаются только известные типы покупок; посторонние списания отфильтровываются.
 FarmShopPhone.PURCHASE_STAT_TYPES = {
+    -- camelCase (как в StoreDeliveries) и snake_case — на случай иной формы события
     newVehiclesCost = true,
+    new_vehicles_cost = true,
+    vehicle_leasing_cost = true,
+    purchase_pallets = true,
+    purchase_seeds = true,
+    purchase_fertilizer = true,
+    purchase_saplings = true,
     vehicleLeasingCost = true,
     purchasePallets = true,
     purchaseSeeds = true,
@@ -2751,7 +2714,8 @@ function FarmShopPhone:handleFinanceStats(amount, statType)
     if amount == nil or amount >= 0 then
         return
     end
-    if statType == nil or not FarmShopPhone.PURCHASE_STAT_TYPES[statType] then
+    local statKey = statType ~= nil and tostring(statType) or nil
+    if statKey == nil or not FarmShopPhone.PURCHASE_STAT_TYPES[statKey] then
         print(string.format("[FarmShopPhone][Purchase] Списание не включено в плату за доставку (statType=%s)",
             tostring(statType)))
         return
@@ -2763,7 +2727,6 @@ function FarmShopPhone:handleFinanceStats(amount, statType)
         FarmShopPhone.deliveryFarmId = g_currentMission:getFarmId()
     end
     self:setOrderState(FarmShopPhone.ORDER_STATE.PURCHASE_PENDING)
-    FarmShopPhone.lastKnownFinanceStats = statType
 end
 
 --- Рассчитывает комиссию за доставку от суммы покупок.
@@ -2779,9 +2742,10 @@ function FarmShopPhone:computeDeliveryFee(total)
 end
 
 --- Списание с проверкой фактического результата по балансу фермы.
--- Отсутствие Lua-ошибки не доказывает списание: при недостатке средств
--- или недоступности API баланс может остаться прежним.
-function FarmShopPhone:withChargeVerification(farmId, chargeFn)
+-- Отсутствие Lua-ошибки не доказывает списание. Если баланс не изменился сразу,
+-- проверка откладывается на ~1 с (деньги могут обновляться асинхронно);
+-- onUnconfirmed() вызывается только если списание так и не подтвердилось.
+function FarmShopPhone:withChargeVerification(farmId, amount, chargeFn, onUnconfirmed)
     local farm = g_farmManager ~= nil and g_farmManager:getFarmById(farmId) or nil
     local balanceBefore = (farm ~= nil and farm.getBalance ~= nil) and farm:getBalance() or nil
 
@@ -2790,14 +2754,26 @@ function FarmShopPhone:withChargeVerification(farmId, chargeFn)
         return false, tostring(err)
     end
 
-    if balanceBefore ~= nil then
-        local balanceAfter = farm:getBalance()
-        if balanceAfter == balanceBefore then
-            return false, "balance_unchanged"
-        end
+    if balanceBefore == nil then
+        -- Проверить нечем (нет farmManager/getBalance) — считаем успехом.
+        return true, nil
     end
 
-    return true, nil
+    local okAfter, balanceAfter = pcall(function() return farm:getBalance() end)
+    if okAfter and balanceAfter ~= balanceBefore then
+        return true, nil
+    end
+
+    FarmShopPhone.chargeVerifyPending = {
+        farm = farm,
+        amount = amount,
+        before = balanceBefore,
+        remaining = 1000,
+        onUnconfirmed = onUnconfirmed
+    }
+    print(string.format("[FarmShopPhone][Delivery] Списание %s не подтверждено сразу — отложенная проверка.",
+        tostring(amount)))
+    return true, "deferred"
 end
 
 --- Списывает накопленную плату за доставку (2.5% от суммы покупок).
@@ -2828,8 +2804,11 @@ function FarmShopPhone:chargeDeliveryFee()
         return false, "charge_error"
     end
 
-    local chargedOk, chargeErr = self:withChargeVerification(farmId, function()
+    local chargedOk, chargeErr = self:withChargeVerification(farmId, fee, function()
         g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
+    end, function()
+        FarmShopPhone.unpaidFee = (FarmShopPhone.unpaidFee or 0) + fee
+        FarmShopPhone.unpaidFeeFarmId = FarmShopPhone.unpaidFeeFarmId or farmId
     end)
     if not chargedOk then
         FarmShopPhone.unpaidFee = (FarmShopPhone.unpaidFee or 0) + fee
@@ -2850,7 +2829,6 @@ function FarmShopPhone:chargeDeliveryFee()
     FarmShopPhone.deliveryFarmId = nil
     FarmShopPhone.purchaseConfirmed = false
     FarmShopPhone.pendingDelivery = false
-    FarmShopPhone.lastKnownFinanceStats = nil
     return true, "charged"
 end
 
@@ -2867,9 +2845,9 @@ function FarmShopPhone:chargeUnpaidFee()
         return false, "no_mission"
     end
 
-    local chargedOk, chargeErr = self:withChargeVerification(farmId, function()
+    local chargedOk, chargeErr = self:withChargeVerification(farmId, fee, function()
         g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
-    end)
+    end, nil)
     if not chargedOk then
         print("[FarmShopPhone][Delivery] ERROR списания прежнего долга: " .. tostring(chargeErr))
         return false, "error"
@@ -2903,8 +2881,10 @@ function FarmShopPhone:chargeCallFee()
         return false, "no_mission"
     end
 
-    local chargedOk, chargeErr = self:withChargeVerification(farmId, function()
+    local chargedOk, chargeErr = self:withChargeVerification(farmId, fee, function()
         g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
+    end, function()
+        print("[FarmShopPhone][Order] WARNING: плата за звонок не подтверждена; повторная попытка при следующем вызове.")
     end)
     if not chargedOk then
         print("[FarmShopPhone][Order] ERROR списания платы за звонок: " .. tostring(chargeErr))
@@ -2919,6 +2899,35 @@ function FarmShopPhone:chargeCallFee()
             nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
     end
     return true, "charged"
+end
+
+--- Возвращает плату за звонок, если выбранный магазин открыть не удалось.
+function FarmShopPhone:refundCallFee()
+    if not self.callFeeCharged then
+        return
+    end
+
+    local farmId = nil
+    if g_currentMission ~= nil and g_currentMission.getFarmId ~= nil then
+        farmId = g_currentMission:getFarmId()
+    end
+    local fee = FarmShopPhone.CALL_FEE
+
+    if g_currentMission == nil or farmId == nil then
+        self.callFeeCharged = false
+        return
+    end
+
+    local okRefund, err = self:withChargeVerification(farmId, fee, function()
+        g_currentMission:addMoney(fee, farmId, MoneyType.OTHER)
+    end, nil)
+    if not okRefund then
+        print("[FarmShopPhone][Order] WARNING: возврат платы за звонок не выполнен: " .. tostring(err))
+        return
+    end
+
+    self.callFeeCharged = false
+    print("[FarmShopPhone][Order] Плата за звонок возвращена: " .. fee)
 end
 
 --- Отложенный возврат мест спавна после появления объектов.
@@ -2948,8 +2957,6 @@ function FarmShopPhone:update(dt)
     end
 
     if self.phoneOpen then
-        -- Жёсткая заморозка: возвращаем персонажа в сохранённую позицию каждый кадр
-        self:applyFrozenPosition()
         self:updatePhoneInput()
     end
 
@@ -2957,7 +2964,9 @@ function FarmShopPhone:update(dt)
     -- а не закрытие каталога и не фиксированный таймер.
     if self.orderActive and not self.orderSettled and g_gui ~= nil then
         if g_gui:getIsGuiVisible() then
-            self.shopWasVisible = true
+            if self.catalogOpenedByUs then
+                self.shopWasVisible = true
+            end
         elseif self.shopWasVisible then
             if FarmShopPhone.purchaseConfirmed then
                 self:finalizeOrderSuccess()
@@ -2965,6 +2974,26 @@ function FarmShopPhone:update(dt)
                 print("[FarmShopPhone][Order] Catalog closed; waiting for purchase confirmation...")
                 self.settleTimer = FarmShopPhone.SETTLE_TIMEOUT_MS
             end
+        end
+    end
+
+    -- Отложенная проверка списания: если баланс не изменился мгновенно.
+    local pendingCharge = FarmShopPhone.chargeVerifyPending
+    if pendingCharge ~= nil then
+        pendingCharge.remaining = pendingCharge.remaining - dt
+        if pendingCharge.remaining <= 0 then
+            local okBalance, balanceNow = pcall(function() return pendingCharge.farm:getBalance() end)
+            if okBalance and balanceNow ~= pendingCharge.before then
+                print(string.format("[FarmShopPhone][Delivery] Списание %s подтверждено при отложенной проверке.",
+                    tostring(pendingCharge.amount)))
+            else
+                print(string.format("[FarmShopPhone][Delivery] WARNING: списание %s так и не подтвердилось.",
+                    tostring(pendingCharge.amount)))
+                if pendingCharge.onUnconfirmed ~= nil then
+                    pcall(pendingCharge.onUnconfirmed)
+                end
+            end
+            FarmShopPhone.chargeVerifyPending = nil
         end
     end
 

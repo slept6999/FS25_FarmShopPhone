@@ -12,7 +12,7 @@
         <text name="FSP_UI_HINT_1" text="UP/DOWN or click - select shop" />
         <text name="FSP_UI_HINT_2" text="A / D or arrows - fulfillment" />
         <text name="FSP_UI_HINT_3" text="ENTER - open shop | ESC - close" />
-        <text name="FSP_UI_FEE" text="Delivery fee 2.5% (max. 5000 EUR)" />
+        <text name="FSP_UI_FEE" text="Delivery fee 2.5% (max. 5000 €)" />
         <text name="FSP_UI_PICKUP_TINY" text="Pickup" />
         <text name="FSP_UI_DELIVERY_TINY" text="Delivery +2.5%" />
         <text name="FSP_DELIVERY_UNSAFE" text="Delivery unavailable: no safe spot nearby" />
