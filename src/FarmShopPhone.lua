@@ -184,7 +184,9 @@ FarmShopPhone.settleTimer = 0           -- окно ожидания реаль�
 FarmShopPhone.restoreTimer = 0          -- отложенный возврат мест спавна после появления объектов
 FarmShopPhone.evidenceObjects = 0       -- сколько объектов создано в рамках заказа
 FarmShopPhone.evidenceSpent = 0         -- сумма списаний в рамках заказа (для платы за доставку)
+FarmShopPhone.pendingLoads = {}         -- loading data, запущенные внутри заказа (токен -> заказ)
 FarmShopPhone.deliveryFailure = nil     -- причина неудачи размещения ("no_space", ...)
+FarmShopPhone.deliveryPartial = false   -- часть товара не удалось разместить
 FarmShopPhone.lastRestoreConflict = false
 
 -- История нажатий клавиш для определения одиночных нажатий ( edge detection ).
@@ -904,7 +906,9 @@ function FarmShopPhone:resetOrderContext()
     self.restoreTimer = 0
     self.evidenceObjects = 0
     self.evidenceSpent = 0
+    self.pendingLoads = {}
     self.deliveryFailure = nil
+    self.deliveryPartial = false
     self.lastRestoreConflict = false
     FarmShopPhone.deliveryTotalCharges = 0
     FarmShopPhone.deliveryFarmId = nil
@@ -1267,7 +1271,9 @@ function FarmShopPhone:openShop()
     self.restoreTimer = 0
     self.evidenceObjects = 0
     self.evidenceSpent = 0
+    self.pendingLoads = {}
     self.deliveryFailure = nil
+    self.deliveryPartial = false
     self.lastRestoreConflict = false
     self:setOrderState(FarmShopPhone.ORDER_STATE.SHOP_OPENING)
 
@@ -1717,7 +1723,7 @@ function FarmShopPhone:showDeliverySuccess(key)
 end
 
 --- Показывает итоговое уведомление заказа (ТЗ §2, экран 5).
-function FarmShopPhone:notifyOrderResult(kind)
+function FarmShopPhone:notifyOrderResult(kind, warningKey)
     if g_currentMission == nil or g_currentMission.hud == nil then
         return
     end
@@ -1727,6 +1733,10 @@ function FarmShopPhone:notifyOrderResult(kind)
         text = getText("FSP_DELIVERY_DONE")
     else
         text = string.format(getText("FSP_ORDER_PICKUP_DONE"), self.orderStoreName or "")
+    end
+
+    if warningKey ~= nil then
+        text = text .. " (" .. getText(warningKey) .. ")"
     end
 
     g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
@@ -2378,6 +2388,21 @@ end
 -- Подтверждение покупки реальным созданием объекта (ТЗ §5)
 -------------------------------------------------------------------------------
 
+--- Регистрирует операцию загрузки объекта, запущенную внутри текущего заказа.
+function FarmShopPhone:registerPendingLoad(loadData)
+    if loadData == nil then
+        return
+    end
+    self.pendingLoads = self.pendingLoads or {}
+    self.pendingLoads[loadData] = FarmShopPhone.orderToken
+end
+
+--- true, если загрузка была запущена именно в рамках текущего заказа.
+function FarmShopPhone:isPendingLoadOfCurrentOrder(loadData)
+    return self.pendingLoads ~= nil
+        and self.pendingLoads[loadData] == FarmShopPhone.orderToken
+end
+
 --- Устанавливает хуки на классы загрузки FS25: покупка подтверждается только
 -- при фактическом создании объекта (VehicleLoadingData/PlaceableLoadingData),
 -- а не по финансовому событию.
@@ -2391,8 +2416,14 @@ function FarmShopPhone:installPurchaseHooks()
     if VehicleLoadingData ~= nil and VehicleLoadingData.load ~= nil then
         local originalLoad = VehicleLoadingData.load
         VehicleLoadingData.load = function(self, callback, callbackTarget, callbackArguments)
+            -- Связываем операцию загрузки с текущим заказом (если она началась внутри него).
+            if FarmShopPhone.orderActive and not FarmShopPhone.orderSettled then
+                FarmShopPhone:registerPendingLoad(self)
+            end
+
             local wrapped = function(cbTarget, objects, loadingState, cbArgs)
-                if loadingState == VehicleLoadingState.OK and objects ~= nil and #objects > 0 then
+                if loadingState == VehicleLoadingState.OK and objects ~= nil and #objects > 0
+                        and FarmShopPhone:isPendingLoadOfCurrentOrder(self) then
                     local ok = pcall(FarmShopPhone.onOrderObjectsCreated, FarmShopPhone, objects)
                     if not ok then
                         print("[FarmShopPhone][Purchase] ERROR in object-creation handler")
@@ -2411,8 +2442,13 @@ function FarmShopPhone:installPurchaseHooks()
     if PlaceableLoadingData ~= nil and PlaceableLoadingData.load ~= nil then
         local originalLoad = PlaceableLoadingData.load
         PlaceableLoadingData.load = function(self, callback, callbackTarget, callbackArguments)
+            if FarmShopPhone.orderActive and not FarmShopPhone.orderSettled then
+                FarmShopPhone:registerPendingLoad(self)
+            end
+
             local wrapped = function(cbTarget, placeable, loadingState, cbArgs)
-                if loadingState == PlaceableLoadingState.OK and placeable ~= nil then
+                if loadingState == PlaceableLoadingState.OK and placeable ~= nil
+                        and FarmShopPhone:isPendingLoadOfCurrentOrder(self) then
                     local ok = pcall(FarmShopPhone.onOrderObjectsCreated, FarmShopPhone, {placeable})
                     if not ok then
                         print("[FarmShopPhone][Purchase] ERROR in object-creation handler")
@@ -2472,7 +2508,7 @@ function FarmShopPhone:onOrderObjectsCreated(objects)
     end
 end
 
---- Завершает успешный заказ после закрытия каталога.
+--- Завершает заказ после закрытия каталога.
 function FarmShopPhone:finalizeOrderSuccess()
     if self.orderSettled then
         return
@@ -2481,9 +2517,30 @@ function FarmShopPhone:finalizeOrderSuccess()
     self.settleTimer = 0
 
     if self.fulfillment == "delivery" then
-        self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_COMPLETED)
-        FarmShopPhone:chargeDeliveryFee()
-        self:notifyOrderResult("delivery")
+        -- Полная или частичная неудача размещения: успех не показываем, плату не списываем.
+        if self.deliveryFailure ~= nil then
+            self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_FAILED)
+            self.restoreTimer = 0
+            self:restoreSpawnPlaces()
+            FarmShopPhone.deliveryTotalCharges = 0
+            FarmShopPhone.deliveryFarmId = nil
+            self:notifyDeliveryError(self.deliveryPartial and "FSP_DELIVERY_PARTIAL" or "FSP_DELIVERY_FAILED")
+            print(string.format("[FarmShopPhone][Delivery] Заказ завершён ошибкой размещения (частично=%s, причина=%s)",
+                tostring(self.deliveryPartial), tostring(self.deliveryFailure)))
+        else
+            -- Результат списания платы проверяем явно.
+            local okCall, charged, reason = pcall(FarmShopPhone.chargeDeliveryFee, FarmShopPhone)
+            if not okCall then
+                print("[FarmShopPhone][Delivery] Ошибка Lua при списании платы: " .. tostring(charged))
+                self:notifyOrderResult("delivery", getText("FSP_DELIVERY_FEE_FAILED"))
+            elseif charged == false then
+                print("[FarmShopPhone][Delivery] WARNING: плата за доставку не списана (" .. tostring(reason) .. ")")
+                self:notifyOrderResult("delivery", getText("FSP_DELIVERY_FEE_FAILED"))
+            else
+                self:notifyOrderResult("delivery")
+            end
+            self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_COMPLETED)
+        end
     else
         self:restoreSpawnPlaces()
         self:setOrderState(FarmShopPhone.ORDER_STATE.COMPLETED)
@@ -2504,12 +2561,20 @@ function FarmShopPhone:onDeliveryPlacementFailed(reason)
     if not self.orderActive or self.orderSettled then
         return
     end
-    if FarmShopPhone.purchaseConfirmed then
-        return
-    end
 
     self.deliveryFailure = reason
     print("[FarmShopPhone][Delivery] Placement failed: " .. tostring(reason))
+
+    if FarmShopPhone.purchaseConfirmed then
+        -- Частичная доставка: часть товара уже размещена, часть — нет.
+        -- Не завершаем заказ и не показываем успех; окончательно решит finalizeOrderSuccess().
+        self.deliveryPartial = true
+        self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_FAILED)
+        print("[FarmShopPhone][Delivery] Частичная доставка: часть товара не размещена.")
+        return
+    end
+
+    -- Ни один объект не создан: заказ сразу завершаем как ошибочный.
     self:setOrderState(FarmShopPhone.ORDER_STATE.DELIVERY_FAILED)
     self:notifyDeliveryError("FSP_DELIVERY_FAILED")
 
@@ -2525,8 +2590,18 @@ function FarmShopPhone:onDeliveryPlacementFailed(reason)
     end
 end
 
---- Обработчик финансовых событий: только учёт суммы покупок для платы за доставку.
--- Факт покупки НЕ определяется по финансовому событию (ТЗ §5).
+--- Обработчик финансовых событий: только учёт стоимости покупок для платы за доставку.
+-- Факт покупки НЕ определяется по финансовому событию (ТЗ §5). В расчёт платы
+-- включаются только известные типы покупок; посторонние списания отфильтровываются.
+FarmShopPhone.PURCHASE_STAT_TYPES = {
+    newVehiclesCost = true,
+    vehicleLeasingCost = true,
+    purchasePallets = true,
+    purchaseSeeds = true,
+    purchaseFertilizer = true,
+    purchaseSaplings = true
+}
+
 function FarmShopPhone:handleFinanceStats(amount, statType)
     if not self.orderActive or self.orderSettled then
         return
@@ -2537,9 +2612,13 @@ function FarmShopPhone:handleFinanceStats(amount, statType)
     if amount == nil or amount >= 0 then
         return
     end
+    if statType == nil or not FarmShopPhone.PURCHASE_STAT_TYPES[statType] then
+        print(string.format("[FarmShopPhone][Purchase] Списание не включено в плату за доставку (statType=%s)",
+            tostring(statType)))
+        return
+    end
 
-    -- Учитываем любые списания, включая мелкие (<= 25). Дубли одного события
-    -- намеренно не отсекаются: две одинаковые покупки в каталоге — это два товара.
+    -- Дубли одного события намеренно не отсекаются: две одинаковые покупки — это два товара.
     self.evidenceSpent = self.evidenceSpent + (-amount)
     if g_currentMission ~= nil and g_currentMission.getFarmId ~= nil then
         FarmShopPhone.deliveryFarmId = g_currentMission:getFarmId()
@@ -2549,17 +2628,17 @@ function FarmShopPhone:handleFinanceStats(amount, statType)
 end
 
 --- Списывает накопленную плату за доставку (2.5% от суммы покупок).
--- Вызывается только после подтверждения создания объектов; идемпотентна.
+-- Возвращает: charged(boolean), reason("charged" | "nothing_to_charge" | "not_confirmed").
 function FarmShopPhone:chargeDeliveryFee()
     if not FarmShopPhone.purchaseConfirmed then
         FarmShopPhone:logValidation("delivery fee not charged: purchase not confirmed by object creation")
-        return false
+        return false, "not_confirmed"
     end
 
     local total = self.evidenceSpent or 0
     if total <= 0 then
         FarmShopPhone:logValidation("delivery fee not charged: no purchases recorded")
-        return false
+        return true, "nothing_to_charge"
     end
 
     local fee = math.floor(total * FarmShopPhone.deliveryRate + 0.5)
@@ -2588,7 +2667,7 @@ function FarmShopPhone:chargeDeliveryFee()
     FarmShopPhone.purchaseConfirmed = false
     FarmShopPhone.pendingDelivery = false
     FarmShopPhone.lastKnownFinanceStats = nil
-    return true
+    return true, "charged"
 end
 
 --- Отложенный возврат мест спавна после появления объектов.
