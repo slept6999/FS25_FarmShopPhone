@@ -660,6 +660,7 @@ function FarmShopPhone:discoverStores()
                         openMode = "trigger",
                         hotspot = nil,
                         placeable = nil,
+                        triggerObject = trigger,
                         triggerNode = node,
                         posX = x,
                         posY = y,
@@ -1166,7 +1167,8 @@ function FarmShopPhone:openStoreInterface(store)
 
     if mode == "trigger" then
         for _, trigger in ipairs(FarmShopPhone.shopTriggers) do
-            if trigger ~= nil and (trigger.shopPlayerSpawn == store.triggerNode
+            if trigger ~= nil and (trigger == store.triggerObject
+                    or trigger.shopPlayerSpawn == store.triggerNode
                     or trigger.rootNode == store.triggerNode) then
                 if callMethodSafe(trigger, "openShop") then
                     return true
@@ -1335,7 +1337,9 @@ function FarmShopPhone:openShop()
     if not opened then
         -- Резервного перехода на общий ShopMenu нет: иначе игрок может купить
         -- в чужой торговой точке вместо выбранной. Отменяем подготовку заказа.
-        print("[FarmShopPhone][UI] Store interface could not be opened.")
+        print(string.format("[FarmShopPhone][UI] Store interface could not be opened: name=%s kind=%s mode=%s placeable=%s trigger=%s",
+            tostring(store.name), tostring(store.kind), tostring(store.openMode),
+            store.placeable ~= nil and "yes" or "no", store.triggerObject ~= nil and "yes" or "no"))
         -- Звонок не удался: возвращаем плату за вызов, чтобы игрок не платил за неработающую точку.
         self:refundCallFee()
         self:notifyOrderResult("delivery", getText("FSP_STORE_OPEN_FAILED"))
