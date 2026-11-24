@@ -189,7 +189,8 @@ FarmShopPhone.pendingLoads = {}         -- loading data, запущенные в
 FarmShopPhone.pendingLoadCount = 0      -- сколько таких загрузок ещё не завершилось
 FarmShopPhone.pendingWaitTimer = 0
 FarmShopPhone.chargeVerifyPending = nil -- отложенная проверка списания (асинхронный баланс)
-FarmShopPhone.DEBUG_SHOP_CONTEXT = true   -- временно: дамп контекста ShopMenu для исследования      -- страховочный таймаут ожидания загрузок перед завершением заказа
+FarmShopPhone.DEBUG_SHOP_CONTEXT = true   -- временно: дамп контекста ShopMenu для исследования
+FarmShopPhone.TRIGGER_OPEN_MODE = "no_teleport" -- "vanilla" | "no_teleport": как открывать ShopTrigger      -- страховочный таймаут ожидания загрузок перед завершением заказа
 FarmShopPhone.patchedSpawners = {}      -- palletSpawner'ы, чьи места подменял мод
 FarmShopPhone.deliveryFailure = nil     -- причина неудачи размещения ("no_space", ...)
 FarmShopPhone.deliveryPartial = false   -- часть товара не удалось разместить
@@ -485,7 +486,7 @@ function FarmShopPhone:deleteMap()
 end
 
 --- Определяет, можно ли открыть оригинальный интерфейс торговой точки.
--- Возвращает режим открытия ("vehicle", "pallet", "workshop", "generic", "openShop")
+-- Возвращает режим открытия ("vehicle", "pallet", "trigger")
 -- или nil. Наличие одной лишь специализации недостаточно — проверяем реальный
 -- интерфейс (activatable/sellingPoint/openShop), поэтому точка не попадает в список,
 -- если её нельзя открыть.
@@ -507,11 +508,6 @@ local function getStoreOpenMode(placeable)
         return "pallet"
     end
 
-    local workshop = placeable.spec_workshop
-    if workshop ~= nil and workshop.sellingPoint ~= nil and workshop.sellingPoint.ownWorkshop == false then
-        return "workshop"
-    end
-
     -- Важно: spec_buyingStation/getBuyingStation — это станции ПРОДАЖИ/приёмки
     -- (BuyingStation наследует LoadingStation), а не магазины покупки. Опускаем их,
     -- чтобы цистерны, мельницы и приёмные пункты не попадали в список.
@@ -524,7 +520,7 @@ end
 local function storeKindFromMode(mode)
     if mode == "pallet" then
         return "palletBuying"
-    elseif mode == "vehicle" or mode == "workshop" then
+    elseif mode == "vehicle" then
         return "vehicleBuying"
     end
     return "standard"
@@ -744,9 +740,11 @@ function FarmShopPhone:discoverStores()
             local node = trigger.shopPlayerSpawn or trigger.rootNode
             local ok, x, y, z = pcall(getWorldTranslation, node)
             if node ~= nil and ok and x ~= nil then
-                local name = nearestHotspotName(x, z, 8.0)
+                local name = nearestHotspotName(x, z, 25.0)
                 if name == nil then
-                    print("[FarmShopPhone][ShopDiscovery] Skipped trigger (нет названия среди маркеров карты)")
+                    -- Не теряем реальную точку из-за отсутствия маркера: даём имя с координатами.
+                    name = string.format("%s (%.0f, %.0f)", getText("FSP_STORE_UNKNOWN"), x, z)
+                    print(string.format("[FarmShopPhone][ShopDiscovery] Trigger without marker name, using fallback: %s", name))
                 else
                     addDiscoveredStore(self, {
                         name = name,
@@ -994,6 +992,7 @@ function FarmShopPhone:resetOrderContext()
     self.deliverySize = nil
     self.orderStoreName = nil
     self.debugPlayerBefore = nil
+    self.debugCatalogTimer = nil
     FarmShopPhone.chargeVerifyPending = nil
 end
 
@@ -1265,6 +1264,22 @@ function FarmShopPhone:openStoreInterface(store)
             if trigger ~= nil and (trigger == store.triggerObject
                     or trigger.shopPlayerSpawn == store.triggerNode
                     or trigger.rootNode == store.triggerNode) then
+                if FarmShopPhone.TRIGGER_OPEN_MODE == "no_teleport" then
+                    -- Исследовательский режим: штатный ShopMenu без ванильного телепорта игрока.
+                    if g_gui == nil or ShopMenu == nil then
+                        print("[FarmShopPhone][UI] no_teleport: g_gui/ShopMenu недоступны.")
+                        return false
+                    end
+                    local okNav, errNav = pcall(function()
+                        g_gui:changeScreen(nil, ShopMenu)
+                    end)
+                    if not okNav then
+                        print("[FarmShopPhone][UI] no_teleport: changeScreen failed: " .. tostring(errNav))
+                        return false
+                    end
+                    print("[FarmShopPhone][UI] no_teleport: ShopMenu changeScreen выполнен без телепорта.")
+                    return true
+                end
                 if callMethodSafe(trigger, "openShop") then
                     return true
                 end
@@ -1286,16 +1301,6 @@ function FarmShopPhone:openStoreInterface(store)
         local spec = placeable.spec_palletBuyingStation
         if spec ~= nil and spec.activatable ~= nil then
             return callMethodSafe(spec.activatable, "run")
-        end
-    elseif mode == "workshop" then
-        local spec = placeable.spec_workshop
-        if spec ~= nil and spec.sellingPoint ~= nil then
-            if callMethodSafe(spec.sellingPoint, "openMenu") then
-                return true
-            end
-            if spec.sellingPoint.activatable ~= nil then
-                return callMethodSafe(spec.sellingPoint.activatable, "run")
-            end
         end
     end
 
@@ -1436,6 +1441,7 @@ function FarmShopPhone:openShop()
         store.placeable ~= nil and "yes" or "no", moved, tostring(moved > 1.0)))
 
     debugShopMenuState("after-open")
+    self.debugCatalogTimer = 1000
 
     -- Телефонный звонок состоялся: точка открыта успешно — только теперь списываем плату.
     local feeOk, feeCharged, feeReason = pcall(FarmShopPhone.chargeCallFee, FarmShopPhone)
@@ -3104,6 +3110,15 @@ function FarmShopPhone:update(dt)
 
     -- Отложенный возврат мест спавна после появления объектов.
     self:processRestoreTimer(dt)
+
+    -- Повторный замер каталога после открытия (диагностика пустого списка).
+    if self.debugCatalogTimer ~= nil and self.debugCatalogTimer > 0 then
+        self.debugCatalogTimer = self.debugCatalogTimer - dt
+        if self.debugCatalogTimer <= 0 then
+            self.debugCatalogTimer = nil
+            debugShopMenuState("after-1s")
+        end
+    end
 
     -- Страховочный таймаут ожидания загрузок: не дождались — не заявляем успешную доставку.
     if self.pendingWaitTimer > 0 and not self.orderSettled and self:canSettleOrder() then
