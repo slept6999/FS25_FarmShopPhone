@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<modDesc descVersion="113">
+
+    <author>slept6999&AI</author>
+    <iconFilename>icon_FarmShopPhone.dds</iconFilename>
+
+    <version>0.2.1.0</version>
+
+    <title>
+        <en>Farm Shop Phone</en>
+        <ru>Телефон фермерских магазинов</ru>
+    </title>
+
+    <description>
+        <en><![CDATA[Phone-style remote ordering from existing map shops in Farming Simulator 25.
+
+Open the phone overlay (key O), browse trading points detected automatically on the current map, choose pickup or one-time delivery, and open the standard FS25 shop catalog. Purchased items spawn at the store (pickup) or at the selected delivery point (delivery). No map buildings, NPCs, prices or catalog data are changed. Single-player only.
+
+Store Deliveries was used only to study the spawn-place placement approach; its scripts and assets are NOT used as a dependency.]]></en>
+        <ru><![CDATA[Удаленные покупки с существующих торговых точек карты через интерфейс телефона в Farming Simulator 25.
+
+Откройте телефонный оверлей (клавиша O), просмотрите торговые точки, найденные автоматически на текущей карте, выберите самовывоз или разовую доставку и откройте стандартный каталог магазина FS25. Купленные товары появляются в магазине (самовывоз) или в точке доставки (доставка). Карта, здания, NPC, цены и данные каталога не изменяются. Только для одиночной игры.
+
+Store Deliveries использовался только для изучения подхода к размещению точки спавна; его скрипты и ресурсы не являются зависимостью мода и не подключаются.]]></ru>
+    </description>
+
+    <iconFilename>icon_FarmShopPhone.dds</iconFilename>
+    <multiplayer supported="false"/>
+
+    <actions>
+        <action name="FSP_OPEN_PHONE" category="ONFOOT"/>
+    </actions>
+
+    <extraSourceFiles>
+        <sourceFile filename="src/FarmShopPhone.lua"/>
+    </extraSourceFiles>
+
+        <l10n filenamePrefix="translations/lang" defaultLanguage="en" />
+
+</modDesc>

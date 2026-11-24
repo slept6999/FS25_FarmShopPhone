@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<l10n>
+    <texts>
+        <text name="input_FSP_OPEN_PHONE" text="Открыть телефон магазинов" />
+        <text name="FSP_STORE_UNKNOWN" text="Магазин без названия" />
+        <text name="FSP_NO_STORES" text="На этой карте не найдены подходящие значки магазинов" />
+        <text name="FSP_STANDARD_STORE" text="Стандартный магазин" />
+        <text name="FSP_DELIVERY_FEE" text="Плата за доставку" />
+        <text name="FSP_UI_TITLE" text="ТЕЛЕФОН ФЕРМЫ" />
+        <text name="FSP_UI_SUBTITLE" text="Удалённый доступ к магазинам" />
+        <text name="FSP_UI_SHOPS" text="ПОСТАВЩИКИ" />
+        <text name="FSP_UI_FULFILLMENT" text="СПОСОБ ПОЛУЧЕНИЯ" />
+        <text name="FSP_UI_HINT_1" text="↑ ↓ или клик — выбрать магазин" />
+        <text name="FSP_UI_HINT_2" text="A / D или ← → — способ получения" />
+        <text name="FSP_UI_HINT_3" text="ENTER — открыть · ESC — закрыть" />
+        <text name="FSP_UI_FEE" text="Доплата за доставку 2,5% (макс. 5000 €)" />
+        <text name="FSP_UI_KIND_PALLET" text="Товары / Паллеты" />
+        <text name="FSP_UI_KIND_VEHICLE" text="Техника" />
+        <text name="FSP_UI_KIND_STANDARD" text="Основной магазин" />
+        <text name="FSP_UI_KIND_OTHER" text="Магазин" />
+        <text name="FSP_UI_PICKUP_TINY" text="Самовывоз" />
+        <text name="FSP_UI_DELIVERY_TINY" text="Доставка +2,5%" />
+    </texts>
+</l10n>

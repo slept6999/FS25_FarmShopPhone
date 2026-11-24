@@ -1,0 +1,16 @@
+# В репозиторий попадает только чистый мод.
+*
+
+!.gitignore
+!modDesc.xml
+!icon_FarmShopPhone.dds
+!src/
+!src/**
+!translations/
+!translations/**
+!ui/
+!ui/textures/
+!ui/textures/**
+
+# Инструкция для переводчиков — не нужна игре
+translations/README.md

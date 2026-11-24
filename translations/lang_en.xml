@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<l10n>
+    <texts>
+        <text name="input_FSP_OPEN_PHONE" text="Open Farm Shop Phone" />
+        <text name="FSP_STORE_UNKNOWN" text="Unnamed shop" />
+        <text name="FSP_NO_STORES" text="No eligible shop icons were found on this map" />
+        <text name="FSP_STANDARD_STORE" text="Standard store" />
+        <text name="FSP_DELIVERY_FEE" text="Delivery fee" />
+        <text name="FSP_UI_TITLE" text="FARM SHOP PHONE" />
+        <text name="FSP_UI_SUBTITLE" text="Remote shop access" />
+        <text name="FSP_UI_SHOPS" text="SUPPLIERS" />
+        <text name="FSP_UI_FULFILLMENT" text="FULFILLMENT" />
+        <text name="FSP_UI_HINT_1" text="UP/DOWN or click - select shop" />
+        <text name="FSP_UI_HINT_2" text="A / D or arrows - fulfillment" />
+        <text name="FSP_UI_HINT_3" text="ENTER - open shop | ESC - close" />
+        <text name="FSP_UI_FEE" text="Delivery fee 2.5% (max. 5000 EUR)" />
+        <text name="FSP_UI_KIND_PALLET" text="Goods / Pallets" />
+        <text name="FSP_UI_KIND_VEHICLE" text="Machinery" />
+        <text name="FSP_UI_KIND_STANDARD" text="Main store" />
+        <text name="FSP_UI_KIND_OTHER" text="Store" />
+        <text name="FSP_UI_PICKUP_TINY" text="Pickup" />
+        <text name="FSP_UI_DELIVERY_TINY" text="Delivery +2.5%" />
+    </texts>
+</l10n>
