@@ -23,6 +23,7 @@
         <text name="FSP_DELIVERY_OBSTRUCTED" text="Delivery unavailable: area is occupied" />
         <text name="FSP_DELIVERY_FAILED" text="Delivery failed" />
         <text name="FSP_DELIVERY_DONE" text="Delivery complete. Goods placed near you" />
+        <text name="FSP_CALL_FEE" text="Phone call fee" />
         <text name="FSP_DELIVERY_PARTIAL" text="Delivery partially failed: some goods could not be placed" />
         <text name="FSP_DELIVERY_FEE_FAILED" text="delivery fee was not charged, see log" />
         <text name="FSP_ORDER_PICKUP_DONE" text="Purchase complete. Pick up your goods at: %s" />
