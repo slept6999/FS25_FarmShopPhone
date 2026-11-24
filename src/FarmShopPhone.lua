@@ -415,14 +415,11 @@ local function getStoreOpenMode(placeable)
         return "workshop"
     end
 
-    -- Пользовательские торговые объекты: базовая станция покупки или собственный openShop.
-    if placeable.spec_buyingStation ~= nil or placeable.getBuyingStation ~= nil then
-        return "generic"
-    end
-    if placeable.openShop ~= nil then
-        return "openShop"
-    end
-
+    -- Важно: spec_buyingStation/getBuyingStation — это станции ПРОДАЖИ/приёмки
+    -- (BuyingStation наследует LoadingStation), а не магазины покупки. Опускаем их,
+    -- чтобы цистерны, мельницы и приёмные пункты не попадали в список.
+    -- Пользовательские торговые объекты с реальным интерфейсом покупки должны быть
+    -- обнаружены через свои специализации выше; иначе точка отфильтровывается.
     return nil
 end
 
@@ -1202,26 +1199,6 @@ function FarmShopPhone:openStoreInterface(store)
                 return callMethodSafe(spec.sellingPoint.activatable, "run")
             end
         end
-    elseif mode == "generic" then
-        -- Пользовательская торговая станция: базовый getBuyingStation/openShop.
-        if placeable.getBuyingStation ~= nil then
-            local ok, station = pcall(placeable.getBuyingStation, placeable)
-            if ok and station ~= nil then
-                if station.openMenu ~= nil and callMethodSafe(station, "openMenu") then
-                    return true
-                end
-                if station.activatable ~= nil and callMethodSafe(station.activatable, "run") then
-                    return true
-                end
-            end
-        end
-        if callMethodSafe(placeable, "openShop") then
-            return true
-        end
-    elseif mode == "openShop" then
-        if callMethodSafe(placeable, "openShop") then
-            return true
-        end
     end
 
     return false
@@ -1347,6 +1324,9 @@ function FarmShopPhone:openShop()
         return false
     end
 
+    print(string.format("[FarmShopPhone][UI] Store interface opened: name=%s kind=%s mode=%s placeable=%s",
+        tostring(store.name), tostring(store.kind), tostring(store.openMode),
+        store.placeable ~= nil and "yes" or "no"))
     self.catalogOpenedByUs = true
     self.orderActive = true
     if self.fulfillment == "delivery" then

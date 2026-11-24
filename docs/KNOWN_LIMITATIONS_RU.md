@@ -19,7 +19,9 @@
 1. **Обнаружение магазинов** — три источника с дедупликацией по ссылке на объект:
    `placeableSystem.placeables` → `mapHotspots` (SHOP) → `ShopTrigger`.
    `storeSpawnPlaces` **не** используется как источник (это точки появления покупок).
-   Исключаются `spec_sellingStation`, `spec_animalDealer`, собственные мастерские;
+   Исключаются `spec_sellingStation`, `spec_animalDealer`, собственные мастерские.
+   `spec_buyingStation`/`getBuyingStation` НЕ считаются магазинами покупки — это станции
+   продажи/приёмки (`BuyingStation` наследует `LoadingStation`).
    `canOpenInterface` выставляется только после проверки реального интерфейса (`getStoreOpenMode`).
 2. **Машина состояний заказа** (`ORDER_STATE`): IDLE, SHOP_SELECTED, FULFILLMENT_SELECTED,
    SHOP_OPENING, SHOP_OPEN, PURCHASE_PENDING, PURCHASE_CONFIRMED, DELIVERY_PENDING,
