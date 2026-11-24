@@ -745,20 +745,20 @@ function FarmShopPhone:discoverStores()
                     -- Не теряем реальную точку из-за отсутствия маркера: даём имя с координатами.
                     name = string.format("%s (%.0f, %.0f)", getText("FSP_STORE_UNKNOWN"), x, z)
                     print(string.format("[FarmShopPhone][ShopDiscovery] Trigger without marker name, using fallback: %s", name))
-                else
-                    addDiscoveredStore(self, {
-                        name = name,
-                        kind = "standard",
-                        openMode = "trigger",
-                        hotspot = nil,
-                        placeable = nil,
-                        triggerObject = trigger,
-                        triggerNode = node,
-                        posX = x,
-                        posY = y,
-                        posZ = z
-                    }, "trigger", seenKeys, seenNames)
                 end
+
+                addDiscoveredStore(self, {
+                    name = name,
+                    kind = "standard",
+                    openMode = "trigger",
+                    hotspot = nil,
+                    placeable = nil,
+                    triggerObject = trigger,
+                    triggerNode = node,
+                    posX = x,
+                    posY = y,
+                    posZ = z
+                }, "trigger", seenKeys, seenNames)
             else
                 print("[FarmShopPhone][ShopDiscovery] Skipped trigger without a valid spawn node")
             end
