@@ -1,6 +1,22 @@
 -- FarmShopPhoneSpawner.lua — модуль FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone, не создаёт своё состояние заказа.
 
+--- Высота рельефа в точке. Возвращает nil для невалидной координаты.
+local function deliveryTerrainHeight(x, z)
+    local node = g_currentMission ~= nil and g_currentMission.terrainRootNode or g_terrainNode
+    if node == nil then
+        return nil
+    end
+
+    local ok, height = pcall(getTerrainHeightAtWorldPos, node, x, 0, z)
+    if not ok or height == nil or height < -1000 then
+        return nil
+    end
+
+    return height
+end
+
+
 local function getText(name)
     return g_i18n:getText(name)
 end
