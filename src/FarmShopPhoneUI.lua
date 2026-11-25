@@ -70,12 +70,6 @@ function FarmShopPhone:drawTexture(name, x, y, w, h)
     return true
 end
 
---- Рисует заполненный прямоугольник (обёртка над renderFillRect движка FS25).
--- Используется в drawPhone() для фонов панелей, строк списка и кнопок.
-local function drawFilledRect(x, y, w, h, r, g, b, a)
-    renderFillRect(x, y, w, h, r, g, b, a)
-end
-
 --- Поддерживает выбранную строку в видимой области списка.
 function FarmShopPhone:keepSelectionVisible()
     local rows = FarmShopPhone.UI.rows
