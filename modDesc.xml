@@ -32,7 +32,15 @@ Store Deliveries использовался только для изучения
 
     <extraSourceFiles>
         <sourceFile filename="src/FarmShopPhone.lua"/>
+        <sourceFile filename="src/FarmShopPhoneCore.lua"/>
+        <sourceFile filename="src/FarmShopPhoneStores.lua"/>
+        <sourceFile filename="src/FarmShopPhoneShop.lua"/>
+        <sourceFile filename="src/FarmShopPhoneDelivery.lua"/>
+        <sourceFile filename="src/FarmShopPhoneSpawner.lua"/>
         <sourceFile filename="src/FarmShopPhoneFinance.lua"/>
+        <sourceFile filename="src/FarmShopPhoneOrders.lua"/>
+        <sourceFile filename="src/FarmShopPhoneUI.lua"/>
+        <sourceFile filename="src/FarmShopPhoneInput.lua"/>
     </extraSourceFiles>
 
         <l10n filenamePrefix="translations/lang" defaultLanguage="en" />
