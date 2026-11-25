@@ -9,17 +9,6 @@ local function inRect(x, y, rx, ry, w, h)
     return x >= rx and x <= rx + w and y >= ry and y <= ry + h
 end
 
-local function limitUtf8(value, maxChars)
-    if value == nil then return "" end
-    local n, out = 0, {}
-    for _, c in utf8.codes(value) do
-        n = n + 1
-        if n > maxChars then break end
-        out[#out+1] = utf8.char(c)
-    end
-    return table.concat(out)
-end
-
 --- Загружает текстуры интерфейса из папки мода (палитра UI Kit).
 function FarmShopPhone:loadUiAssets()
     if self.uiAssets ~= nil then
