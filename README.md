@@ -2,7 +2,7 @@
 
 Мод добавляет в Farming Simulator 25 телефонный интерфейс для покупок на существующих торговых точках карты: обнаружение магазинов, выбор самовывоза или доставки к игроку, открытие штатного каталога FS25.
 
-![Интерфейс телефона (RU)](https://raw.githubusercontent.com/slept6999/FS25_FarmShopPhone/main/screenshots/ui_ru.png)
+![Интерфейс телефона (RU)](screenshots/ui_ru_small.png)
 
 ## Возможности
 
@@ -29,7 +29,7 @@
 
 The mod adds a phone interface to Farming Simulator 25 for buying at the existing map shops: shop discovery, pickup or delivery-to-player, and opening the original FS25 catalog.
 
-![Phone UI (EN)](https://raw.githubusercontent.com/slept6999/FS25_FarmShopPhone/main/screenshots/ui_en.png)
+![Phone UI (EN)](screenshots/ui_en_small.png)
 
 ## Features
 
