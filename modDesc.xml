@@ -32,6 +32,7 @@ Store Deliveries использовался только для изучения
 
     <extraSourceFiles>
         <sourceFile filename="src/FarmShopPhone.lua"/>
+        <sourceFile filename="src/FarmShopPhoneFinance.lua"/>
     </extraSourceFiles>
 
         <l10n filenamePrefix="translations/lang" defaultLanguage="en" />
