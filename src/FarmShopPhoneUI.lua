@@ -23,9 +23,15 @@ function FarmShopPhone:loadUiAssets()
 
     local loaded = true
     for _, name in ipairs(names) do
+        -- Сначала пробуем сжатый DDS (нет предупреждений о размере), затем PNG как запасной вариант.
         local ok, overlay = pcall(function()
-            return Overlay.new(dir .. name .. ".png", 0, 0, 0.1, 0.1)
+            return Overlay.new(dir .. name .. ".dds", 0, 0, 0.1, 0.1)
         end)
+        if not (ok and overlay ~= nil and overlay.overlayId ~= 0) then
+            ok, overlay = pcall(function()
+                return Overlay.new(dir .. name .. ".png", 0, 0, 0.1, 0.1)
+            end)
+        end
         if ok and overlay ~= nil and overlay.overlayId ~= 0 then
             self.uiAssets[name] = overlay
         else
