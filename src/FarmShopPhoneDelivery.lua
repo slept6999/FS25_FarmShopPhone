@@ -1,4 +1,4 @@
--- FarmShopPhoneDelivery.lua — модуль FS25 Farm Shop Phone.
+﻿-- FarmShopPhoneDelivery.lua — модуль FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone, не создаёт своё состояние заказа.
 
 local function getText(name)
@@ -270,7 +270,7 @@ function FarmShopPhone:isDeliveryLocationSafe(x, y, z, size)
     size = size or FarmShopPhone.DELIVERY_SAFETY.defaultSize
     local ok, reason, _, _ = self:validateDeliveryArea({x, 0, z}, size)
     if not ok then
-        return false, reason or getText("FSP_DELIVERY_UNSAFE_GENERIC")
+        return false, reason or FarmShopPhone:getText("FSP_DELIVERY_UNSAFE_GENERIC")
     end
     return true, nil
 end

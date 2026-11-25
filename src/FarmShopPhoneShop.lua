@@ -1,4 +1,4 @@
--- FarmShopPhoneShop.lua — модуль FS25 Farm Shop Phone.
+﻿-- FarmShopPhoneShop.lua — модуль FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone, не создаёт своё состояние заказа.
 
 local function getText(name)
@@ -193,18 +193,18 @@ function FarmShopPhone:openShop()
     if not opened then
         -- Резервного перехода на общий ShopMenu нет: иначе игрок может купить
         -- в чужой торговой точке вместо выбранной. Отменяем подготовку заказа.
-        local moved = playerMovedDistance(self.debugPlayerBefore)
+        local moved = FarmShopPhone:playerMovedDistance(self.debugPlayerBefore)
         print(string.format("[FarmShopPhone][UI] Store interface could not be opened: name=%s kind=%s mode=%s placeable=%s trigger=%s reason=open_interface_failed playerDistance=%.1f playerTeleported=%s",
             tostring(store.name), tostring(store.kind), tostring(store.openMode),
             store.placeable ~= nil and "yes" or "no", store.triggerObject ~= nil and "yes" or "no",
             moved, tostring(moved > 1.0)))
         -- Плата за звонок НЕ списывается: точку открыть не удалось («трубку не сняли»).
-        self:notifyOrderResult("delivery", getText("FSP_STORE_OPEN_FAILED"))
+        self:notifyOrderResult("delivery", FarmShopPhone:getText("FSP_STORE_OPEN_FAILED"))
         self:abortOrder("shop_interface_unavailable")
         return false
     end
 
-    local moved = playerMovedDistance(self.debugPlayerBefore)
+    local moved = FarmShopPhone:playerMovedDistance(self.debugPlayerBefore)
     print(string.format("[FarmShopPhone][UI] Store interface opened: name=%s kind=%s mode=%s placeable=%s playerDistance=%.1f playerTeleported=%s",
         tostring(store.name), tostring(store.kind), tostring(store.openMode),
         store.placeable ~= nil and "yes" or "no", moved, tostring(moved > 1.0)))

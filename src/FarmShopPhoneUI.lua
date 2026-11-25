@@ -1,4 +1,4 @@
--- FarmShopPhoneUI.lua — модуль интерфейса FS25 Farm Shop Phone.
+﻿-- FarmShopPhoneUI.lua — модуль интерфейса FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone.
 
 local function getText(name)
@@ -122,7 +122,7 @@ end
 --- Локализует причину, переданную как ключ FSP_*, либо возвращает текст как есть.
 local function localizeReason(reason)
     if type(reason) == "string" and reason:sub(1, 4) == "FSP_" then
-        return getText(reason)
+        return FarmShopPhone:getText(reason)
     end
     return reason or ""
 end
@@ -130,7 +130,7 @@ end
 --- Показывает уведомление об ошибке доставки.
 function FarmShopPhone:showDeliveryError(reason)
     if g_currentMission ~= nil and g_currentMission.hud ~= nil then
-        local text = getText("FSP_DELIVERY_UNSAFE") .. " " .. localizeReason(reason)
+        local text = FarmShopPhone:getText("FSP_DELIVERY_UNSAFE") .. " " .. localizeReason(reason)
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_CRITICAL,
             text, nil, GuiSoundPlayer.SOUND_SAMPLES.ERROR)
     end
@@ -139,7 +139,7 @@ end
 --- Показывает уведомление об успешном выборе/размещении доставки.
 function FarmShopPhone:showDeliverySuccess(key)
     if g_currentMission ~= nil and g_currentMission.hud ~= nil then
-        local text = getText(key)
+        local text = FarmShopPhone:getText(key)
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
             text, nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
     end
@@ -153,13 +153,13 @@ function FarmShopPhone:notifyOrderResult(kind, warningKey)
 
     local text
     if kind == "delivery" then
-        text = getText("FSP_DELIVERY_DONE")
+        text = FarmShopPhone:getText("FSP_DELIVERY_DONE")
     else
-        text = string.format(getText("FSP_ORDER_PICKUP_DONE"), self.orderStoreName or "")
+        text = string.format(FarmShopPhone:getText("FSP_ORDER_PICKUP_DONE"), self.orderStoreName or "")
     end
 
     if warningKey ~= nil then
-        text = text .. " (" .. getText(warningKey) .. ")"
+        text = text .. " (" .. FarmShopPhone:getText(warningKey) .. ")"
     end
 
     g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
@@ -218,13 +218,13 @@ function FarmShopPhone:drawPhone()
     end
 
     -- Шапка: обе надписи строго по центру панели.
-    self:drawCenteredText(getText("FSP_UI_TITLE"),
+    self:drawCenteredText(FarmShopPhone:getText("FSP_UI_TITLE"),
         ui.innerX, ui.headerY + 0.036, ui.innerW, 0.036, 0.021, 0.72, 0.95, 0.29, 1)
-    self:drawCenteredText(getText("FSP_UI_SUBTITLE"),
+    self:drawCenteredText(FarmShopPhone:getText("FSP_UI_SUBTITLE"),
         ui.innerX, ui.headerY + 0.004, ui.innerW, 0.03, 0.013, 0.62, 0.62, 0.62, 1)
 
     -- Заголовок списка поставщиков — по центру панели.
-    self:drawCenteredText(getText("FSP_UI_SHOPS"),
+    self:drawCenteredText(FarmShopPhone:getText("FSP_UI_SHOPS"),
         ui.innerX, ui.listTop + 0.002, ui.innerW, 0.026, 0.016, 0.72, 0.95, 0.29, 1)
 
     local firstIndex = self.storeScrollOffset
@@ -233,7 +233,7 @@ function FarmShopPhone:drawPhone()
 
     if #self.stores == 0 then
         setTextColor(0.94, 0.73, 0.29, 1)
-        renderText(ui.listX + 0.012, y - 0.022, 0.015, getText("FSP_NO_STORES"))
+        renderText(ui.listX + 0.012, y - 0.022, 0.015, FarmShopPhone:getText("FSP_NO_STORES"))
         setTextColor(1, 1, 1, 1)
     else
         for i = firstIndex, lastIndex do
@@ -278,7 +278,7 @@ function FarmShopPhone:drawPhone()
             else
                 setTextColor(1, 1, 1, 1)
             end
-            local name = limitUtf8(self.stores[i].name, 28)
+            local name = FarmShopPhone:limitUtf8(self.stores[i].name, 28)
             renderText(textX, rowY + 0.0195, 0.015, name)
             setTextColor(1, 1, 1, 1)
         end
@@ -298,7 +298,7 @@ function FarmShopPhone:drawPhone()
     end
 
     -- Заголовок способа получения — по центру, над карточками.
-    self:drawCenteredText(getText("FSP_UI_FULFILLMENT"),
+    self:drawCenteredText(FarmShopPhone:getText("FSP_UI_FULFILLMENT"),
         ui.innerX, ui.fulfillmentY + ui.cardH + 0.008, ui.innerW, 0.026, 0.016,
         0.72, 0.95, 0.29, 1)
 
@@ -365,14 +365,14 @@ function FarmShopPhone:drawPhone()
     else
         setTextColor(1, 1, 1, 1)
     end
-    renderText(textX, textY, 0.011, getText("FSP_UI_PICKUP_TINY"))
+    renderText(textX, textY, 0.011, FarmShopPhone:getText("FSP_UI_PICKUP_TINY"))
 
     if deliverySelected then
         setTextColor(0.72, 0.95, 0.29, 1)
     else
         setTextColor(1, 1, 1, 1)
     end
-    renderText(deliveryTextX, textY, 0.011, getText("FSP_UI_DELIVERY_TINY"))
+    renderText(deliveryTextX, textY, 0.011, FarmShopPhone:getText("FSP_UI_DELIVERY_TINY"))
 
     setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_BASELINE)
     setTextColor(1, 1, 1, 1)
@@ -411,13 +411,13 @@ function FarmShopPhone:drawPhone()
     end
 
     -- Нижняя подсказка.
-    self:drawCenteredText(getText("FSP_UI_HINT_1"),
+    self:drawCenteredText(FarmShopPhone:getText("FSP_UI_HINT_1"),
         ui.innerX, ui.footerY + 0.062, ui.innerW, 0.022, 0.011, 0.62, 0.62, 0.62, 1)
-    self:drawCenteredText(getText("FSP_UI_HINT_2"),
+    self:drawCenteredText(FarmShopPhone:getText("FSP_UI_HINT_2"),
         ui.innerX, ui.footerY + 0.038, ui.innerW, 0.022, 0.011, 0.62, 0.62, 0.62, 1)
-    self:drawCenteredText(getText("FSP_UI_HINT_3"),
+    self:drawCenteredText(FarmShopPhone:getText("FSP_UI_HINT_3"),
         ui.innerX, ui.footerY + 0.014, ui.innerW, 0.022, 0.011, 0.62, 0.62, 0.62, 1)
-    self:drawCenteredText(getText("FSP_UI_FEE"),
+    self:drawCenteredText(FarmShopPhone:getText("FSP_UI_FEE"),
         ui.innerX, ui.contentY + 0.016, ui.innerW, 0.02, 0.01, 0.94, 0.73, 0.29, 1)
 end
 

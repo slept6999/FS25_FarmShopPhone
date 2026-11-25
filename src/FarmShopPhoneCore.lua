@@ -118,6 +118,6 @@ function FarmShopPhone:notifyDeliveryError(key)
     end
 
     g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
-        getText(key), nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
+        FarmShopPhone:getText(key), nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
 end
 

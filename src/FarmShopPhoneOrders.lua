@@ -1,4 +1,4 @@
--- FarmShopPhoneOrders.lua — модуль FS25 Farm Shop Phone.
+﻿-- FarmShopPhoneOrders.lua — модуль FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone, не создаёт своё состояние заказа.
 
 local function getText(name)
@@ -278,10 +278,10 @@ function FarmShopPhone:finalizeOrderSuccess()
         local okCall, charged, reason = pcall(FarmShopPhone.chargeDeliveryFee, FarmShopPhone)
         if not okCall then
             print("[FarmShopPhone][Delivery] Ошибка Lua при списании платы: " .. tostring(charged))
-            self:notifyOrderResult("delivery", getText("FSP_DELIVERY_FEE_FAILED"))
+            self:notifyOrderResult("delivery", FarmShopPhone:getText("FSP_DELIVERY_FEE_FAILED"))
         elseif charged == false then
             print("[FarmShopPhone][Delivery] WARNING: плата за доставку не списана (" .. tostring(reason) .. "); сумма сохранена как долг.")
-            self:notifyOrderResult("delivery", getText("FSP_DELIVERY_FEE_FAILED"))
+            self:notifyOrderResult("delivery", FarmShopPhone:getText("FSP_DELIVERY_FEE_FAILED"))
         else
             self:notifyOrderResult("delivery")
         end

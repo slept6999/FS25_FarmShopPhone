@@ -1,4 +1,4 @@
--- FarmShopPhoneInput.lua — модуль FS25 Farm Shop Phone.
+﻿-- FarmShopPhoneInput.lua — модуль FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone, не создаёт своё состояние заказа.
 
 local function getText(name)
@@ -180,7 +180,7 @@ end
 local function elementAt(elements, x, y)
     for index, element in ipairs(elements) do
         local r = element.rect
-        if inRect(x, y, r[1], r[2], r[3], r[4]) then
+        if FarmShopPhone:inRect(x, y, r[1], r[2], r[3], r[4]) then
             return index, element
         end
     end
@@ -269,7 +269,7 @@ function FarmShopPhone:updatePhoneInput()
 
     -- Колесо мыши: прокрутка списка с реальными границами содержимого.
     local overList = mouseX ~= nil and mouseY ~= nil
-            and inRect(mouseX, mouseY, ui.listX,
+            and FarmShopPhone:inRect(mouseX, mouseY, ui.listX,
                 ui.listTop - ui.rows * ui.rowH, ui.listW, ui.rows * ui.rowH)
     local wheelUp = Input.isMouseButtonPressed(Input.MOUSE_BUTTON_WHEEL_UP)
     local wheelDown = Input.isMouseButtonPressed(Input.MOUSE_BUTTON_WHEEL_DOWN)

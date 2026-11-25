@@ -1,4 +1,4 @@
--- FarmShopPhoneStores.lua — модуль FS25 Farm Shop Phone.
+﻿-- FarmShopPhoneStores.lua — модуль FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone, не создаёт своё состояние заказа.
 
 local function getText(name)
@@ -136,7 +136,7 @@ local function getHotspotName(hotspot)
         end
     end
     if name == nil or name == "" then
-        name = getText("FSP_STORE_UNKNOWN")
+        name = FarmShopPhone:getText("FSP_STORE_UNKNOWN")
     end
     return name
 end
@@ -213,10 +213,10 @@ function FarmShopPhone:discoverStores()
                     if ok then name = value end
                 end
                 if name == nil or name == "" then
-                    name = placeable.name or getText("FSP_STORE_UNKNOWN")
+                    name = placeable.name or FarmShopPhone:getText("FSP_STORE_UNKNOWN")
                 end
 
-                if name ~= nil and name ~= "" and name ~= getText("FSP_STORE_UNKNOWN") then
+                if name ~= nil and name ~= "" and name ~= FarmShopPhone:getText("FSP_STORE_UNKNOWN") then
                     local ppos = getPlaceablePosition(placeable)
                     if ppos ~= nil then
                         table.insert(placeableNames, {
@@ -290,7 +290,7 @@ function FarmShopPhone:discoverStores()
                     name = nearestNamedPlaceable(x, z, 25.0)
                 end
                 if name == nil then
-                    name = getText("FSP_STORE_GENERIC")
+                    name = FarmShopPhone:getText("FSP_STORE_GENERIC")
                     print(string.format("[FarmShopPhone][ShopDiscovery] Trigger name not found, using generic name"))
                 end
 

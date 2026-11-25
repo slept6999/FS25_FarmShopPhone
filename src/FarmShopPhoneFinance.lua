@@ -1,4 +1,4 @@
--- FarmShopPhoneFinance.lua — расчёт и проведение платежей.
+﻿-- FarmShopPhoneFinance.lua — расчёт и проведение платежей.
 -- Модуль использует общий объект FarmShopPhone, не создаёт своё состояние.
 -- Загружается после src/FarmShopPhone.lua (там определены константы и состояние).
 
@@ -100,7 +100,7 @@ function FarmShopPhone:chargeDeliveryFee()
         return false, "charge_error"
     end
 
-    local text = string.format("%s: -%s", getText("FSP_DELIVERY_FEE"), g_i18n:formatMoney(fee, 0, false, true))
+    local text = string.format("%s: -%s", FarmShopPhone:getText("FSP_DELIVERY_FEE"), g_i18n:formatMoney(fee, 0, false, true))
     if g_currentMission.hud ~= nil then
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO, text, nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
     end
@@ -146,7 +146,7 @@ function FarmShopPhone:chargeUnpaidFee()
     FarmShopPhone.unpaidFeeFarmId = nil
     if g_currentMission.hud ~= nil then
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
-            string.format("%s: -%s", getText("FSP_DELIVERY_FEE"), g_i18n:formatMoney(fee, 0, false, true)),
+            string.format("%s: -%s", FarmShopPhone:getText("FSP_DELIVERY_FEE"), g_i18n:formatMoney(fee, 0, false, true)),
             nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
     end
     return true, "charged"
@@ -192,7 +192,7 @@ function FarmShopPhone:chargeCallFee()
     print("[FarmShopPhone][Order] Плата за звонок списана: " .. fee)
     if g_currentMission.hud ~= nil then
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
-            string.format("%s: -%s", getText("FSP_CALL_FEE"), g_i18n:formatMoney(fee, 0, false, true)),
+            string.format("%s: -%s", FarmShopPhone:getText("FSP_CALL_FEE"), g_i18n:formatMoney(fee, 0, false, true)),
             nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
     end
     return true, "charged"

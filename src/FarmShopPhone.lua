@@ -137,12 +137,12 @@ FarmShopPhone.UI = {
 FarmShopPhone.storeScrollOffset = 1
 
 --- Возвращает true, если точка находится внутри прямоугольника.
-local function inRect(x, y, rx, ry, w, h)
+function FarmShopPhone:inRect(x, y, rx, ry, w, h)
     return x >= rx and x <= rx + w and y >= ry and y <= ry + h
 end
 
 --- Обрезает строку по символам UTF-8, не разрезая многобайтовые символы.
-local function limitUtf8(value, maxChars)
+function FarmShopPhone:limitUtf8(value, maxChars)
     if value == nil then
         return ""
     end
@@ -230,12 +230,12 @@ FarmShopPhone.palletDeliveryApplied = false
 -------------------------------------------------------------------------------
 
 --- Возвращает локализованную строку по имени ключа из modDesc.xml (секция <l10n>).
-local function getText(name)
+function FarmShopPhone:getText(name)
     return g_i18n:getText(name)
 end
 
 --- Расстояние, на которое переместился игрок (для диагностики телепорта).
-local function playerMovedDistance(before)
+function FarmShopPhone:playerMovedDistance(before)
     if before == nil then
         return -1
     end
