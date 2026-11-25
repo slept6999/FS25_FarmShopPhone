@@ -1914,7 +1914,9 @@ function FarmShopPhone:drawPhone()
             end
 
             local iconName = storeIconName(self.stores[i].kind)
-            local iconSize = 0.022
+            -- У store_grey (64x64, глиф 36x36) глиф визуально мельче, чем у 48x48 иконок;
+            -- увеличиваем полотно, чтобы глифы были одного размера.
+            local iconSize = (iconName == "store_grey") and 0.022 * 64 / 48 or 0.022
             if textured then
                 self:drawIconSquare(iconName, ui.listX + 0.008,
                     rowY + (ui.rowH - iconSize) * 0.5, iconSize)
@@ -1927,7 +1929,7 @@ function FarmShopPhone:drawPhone()
                 setTextColor(1, 1, 1, 1)
             end
             local name = limitUtf8(self.stores[i].name, 28)
-            renderText(textX, rowY + 0.021, 0.015, name)
+            renderText(textX, rowY + 0.0195, 0.015, name)
             setTextColor(1, 1, 1, 1)
         end
 
@@ -2003,7 +2005,7 @@ function FarmShopPhone:drawPhone()
     local cardIconW = cardIconSize / (g_screenAspectRatio or (16.0 / 9.0))
     local textX = ui.cardX + 0.006 + cardIconW + 0.008
     local deliveryTextX = ui.deliveryX + 0.006 + cardIconW + 0.008
-    local textY = ui.fulfillmentY + ui.cardH * 0.5 + 0.011 * 0.15
+    local textY = ui.fulfillmentY + ui.cardH * 0.5 + 0.005
 
     setTextAlignment(RenderText.ALIGN_LEFT)
     setTextVerticalAlignment(RenderText.VERTICAL_ALIGN_MIDDLE)
@@ -2066,7 +2068,7 @@ function FarmShopPhone:drawPhone()
     self:drawCenteredText(getText("FSP_UI_HINT_3"),
         ui.innerX, ui.footerY + 0.014, ui.innerW, 0.022, 0.011, 0.62, 0.62, 0.62, 1)
     self:drawCenteredText(getText("FSP_UI_FEE"),
-        ui.innerX, ui.contentY + 0.004, ui.innerW, 0.02, 0.01, 0.94, 0.73, 0.29, 1)
+        ui.innerX, ui.contentY + 0.016, ui.innerW, 0.02, 0.01, 0.94, 0.73, 0.29, 1)
 end
 
 --- Снимок всех скалярных полей места спавна (полное восстановление и проверка).
