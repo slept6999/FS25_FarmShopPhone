@@ -2,17 +2,30 @@
 
 Мод добавляет в Farming Simulator 25 телефонный интерфейс для покупок на существующих торговых точках карты: обнаружение магазинов, выбор самовывоза или доставки к игроку, открытие штатного каталога FS25.
 
+<table width="100%">
+<tr>
+<td valign="top" width="280">
+
 ![Интерфейс телефона (RU)](screenshots/ui_ru_small.png)
 
-## Возможности
+</td>
+<td valign="top">
 
-- Клавиша **O** — открыть/закрыть телефон.
-- Обнаружение только реальных точек покупки: `spec_vehicleBuyingStation`, `spec_palletBuyingStation`, `ShopTrigger` (пункты приёмки, продажи и мастерские отфильтровываются).
-- Триггерные точки открываются штатным каталогом **без телепортации игрока**.
-- Два способа получения: **самовывоз** и **доставка к игроку** с доплатой 2,5 % (максимум 5000). Плата за звонок — 10, списывается только при успешном открытии магазина.
-- Проверка места доставки: рельеф, уклон, вода, коллизии, отступ от игрока/машины.
-- Факт покупки подтверждается реальным созданием объекта; заказ завершается успехом только после завершения всех его загрузок.
-- Только одиночная игра; мультиплеер отключён в `modDesc.xml`.
+<h2>Возможности</h2>
+
+<ul>
+<li>Клавиша <b>O</b> — открыть/закрыть телефон.</li>
+<li>Обнаружение только реальных точек покупки: <code>spec_vehicleBuyingStation</code>, <code>spec_palletBuyingStation</code>, <code>ShopTrigger</code> (пункты приёмки, продажи и мастерские отфильтровываются).</li>
+<li>Триггерные точки открываются штатным каталогом <b>без телепортации игрока</b>.</li>
+<li>Два способа получения: <b>самовывоз</b> и <b>доставка к игроку</b> с доплатой 2,5 % (максимум 5000). Плата за звонок — 10, списывается только при успешном открытии магазина.</li>
+<li>Проверка места доставки: рельеф, уклон, вода, коллизии, отступ от игрока/машины.</li>
+<li>Факт покупки подтверждается реальным созданием объекта; заказ завершается успехом только после завершения всех его загрузок.</li>
+<li>Только одиночная игра; многопользовательский режим отключён в <code>modDesc.xml</code>.</li>
+</ul>
+
+</td>
+</tr>
+</table>
 
 ## Установка
 
@@ -29,17 +42,30 @@
 
 The mod adds a phone interface to Farming Simulator 25 for buying at the existing map shops: shop discovery, pickup or delivery-to-player, and opening the original FS25 catalog.
 
+<table width="100%">
+<tr>
+<td valign="top" width="280">
+
 ![Phone UI (EN)](screenshots/ui_en_small.png)
 
-## Features
+</td>
+<td valign="top">
 
-- Key **O** opens/closes the phone.
-- Only real purchase points are discovered: `spec_vehicleBuyingStation`, `spec_palletBuyingStation`, `ShopTrigger` (buying/selling stations and workshops are filtered out).
-- Trigger-based shops open the vanilla catalog **without teleporting the player**.
-- Two fulfillment methods: **pickup** and **delivery to the player** with a 2.5% surcharge (max. 5000). A phone-call fee of 10 is charged only when the store opens successfully.
-- Delivery spot validation: terrain, slope, water, collisions, clearance from the player/vehicle.
-- Purchase is confirmed by actual object creation; an order completes successfully only after all of its loads finish.
-- Single-player only; multiplayer is disabled in `modDesc.xml`.
+<h2>Features</h2>
+
+<ul>
+<li>Key <b>O</b> opens/closes the phone.</li>
+<li>Only real purchase points are discovered: <code>spec_vehicleBuyingStation</code>, <code>spec_palletBuyingStation</code>, <code>ShopTrigger</code> (buying/selling stations and workshops are filtered out).</li>
+<li>Trigger-based shops open the vanilla catalog <b>without teleporting the player</b>.</li>
+<li>Two fulfillment methods: <b>pickup</b> and <b>delivery to the player</b> with a 2.5% surcharge (max. 5000). A phone-call fee of 10 is charged only when the store opens successfully.</li>
+<li>Delivery spot validation: terrain, slope, water, collisions, clearance from the player/vehicle.</li>
+<li>Purchase is confirmed by actual object creation; an order completes successfully only after all of its loads finish.</li>
+<li>Single-player only; multiplayer is disabled in <code>modDesc.xml</code>.</li>
+</ul>
+
+</td>
+</tr>
+</table>
 
 ## Installation
 
