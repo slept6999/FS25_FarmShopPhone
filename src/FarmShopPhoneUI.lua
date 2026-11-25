@@ -1,14 +1,6 @@
 ﻿-- FarmShopPhoneUI.lua — модуль интерфейса FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone.
 
-local function getText(name)
-    return g_i18n:getText(name)
-end
-
-local function inRect(x, y, rx, ry, w, h)
-    return x >= rx and x <= rx + w and y >= ry and y <= ry + h
-end
-
 --- Загружает текстуры интерфейса из папки мода (палитра UI Kit).
 function FarmShopPhone:loadUiAssets()
     if self.uiAssets ~= nil then
