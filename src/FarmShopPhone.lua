@@ -308,7 +308,7 @@ function FarmShopPhone:loadUiAssets()
     local dir = Utils.getFilename("ui/textures/", self.MOD_DIRECTORY)
     local names = {
         "tablet_frame_blue", "phone_screen_background", "phone_header_panel", "phone_content_panel", "phone_footer_panel", "phone_32",
-        "call_button_wide", "package_grey", "store_grey", "tractor_grey", "store_lime", "truck_lime", "check_lime"
+        "call_button_wide", "call_button_red", "package_grey", "store_grey", "tractor_grey", "store_lime", "truck_lime", "check_lime"
     
     }
 
@@ -2031,21 +2031,25 @@ function FarmShopPhone:drawPhone()
     local callHovered = self.hoverId == "call"
     local callPressed = self.pressedId == "call"
 
+    -- При нажатии «трубка» краснеет — как активный звонок в реальном телефоне.
+    local callActive = callPressed and callEnabled
     if textured then
-        self:drawTexture("call_button_wide",
+        self:drawTexture(callActive and "call_button_red" or "call_button_wide",
             ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH)
     else
-        drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH,
-            callEnabled and 0.72 or 0.35, callEnabled and 0.95 or 0.40,
-            callEnabled and 0.29 or 0.20, 1)
+        if callActive then
+            drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 0.95, 0.30, 0.25, 1)
+        else
+            drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH,
+                callEnabled and 0.72 or 0.35, callEnabled and 0.95 or 0.40,
+                callEnabled and 0.29 or 0.20, 1)
+        end
     end
 
-    -- Состояния кнопки: disabled, pressed, hover, focused.
+    -- Состояния кнопки: disabled, hover, focused (pressed уже отрисован красным).
     if not callEnabled then
         drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 0.06, 0.07, 0.08, 0.55)
-    elseif callPressed then
-        drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 0.10, 0.12, 0.13, 0.35)
-    elseif callHovered then
+    elseif callHovered and not callActive then
         drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 1, 1, 1, 0.10)
     end
 
