@@ -1309,15 +1309,14 @@ function FarmShopPhone:openShop()
             local ok, result = pcall(function()
                 return self:applyPalletSpawnPlaces(store.placeable, target)
             end)
-            if not ok then
-                print("[FarmShopPhone][Delivery] Pallet spawn patch failed: " .. tostring(result))
+            if not ok or result ~= true then
+                print("[FarmShopPhone][Delivery] Pallet spawn patch failed: " .. tostring(ok and result or "error"))
                 self:restorePalletSpawnPlaces()
-            else
-                applied = result
+                self:abortOrder("delivery spawn override failed")
+                return false
             end
-        end
-
-        if not applied then
+            applied = true
+        elseif not applied then
             local ok, result = pcall(function()
                 return self:applyDeliverySpawnPlace(target)
             end)
@@ -2425,11 +2424,12 @@ function FarmShopPhone:registerPendingLoad(loadData)
 end
 
 --- Отмечает завершение операции загрузки; возвращает true, если это был груз заказа.
-function FarmShopPhone:unregisterPendingLoad(loadData)
+function FarmShopPhone:unregisterPendingLoad(loadData, loadToken)
     if self.pendingLoads == nil or loadData == nil then
         return false
     end
-    if self.pendingLoads[loadData] == FarmShopPhone.orderToken then
+    local token = loadToken or FarmShopPhone.orderToken
+    if self.pendingLoads[loadData] == token then
         self.pendingLoads[loadData] = nil
         self.pendingLoadCount = math.max(0, (self.pendingLoadCount or 0) - 1)
         return true
@@ -2502,10 +2502,10 @@ function FarmShopPhone:installPurchaseHooks()
                     end
                 end
                 if callback ~= nil then
-                    callback(cbTarget, objects, loadingState, cbArgs)
+                    pcall(callback, cbTarget, objects, loadingState, cbArgs)
                 end
                 if belongsToOrder then
-                    FarmShopPhone:unregisterPendingLoad(self)
+                    FarmShopPhone:unregisterPendingLoad(self, loadToken)
                     FarmShopPhone:onPendingLoadFinished()
                 end
             end
@@ -2551,10 +2551,10 @@ function FarmShopPhone:installPurchaseHooks()
                     end
                 end
                 if callback ~= nil then
-                    callback(cbTarget, result, loadingState, cbArgs)
+                    pcall(callback, cbTarget, result, loadingState, cbArgs)
                 end
                 if belongsToOrder then
-                    FarmShopPhone:unregisterPendingLoad(self)
+                    FarmShopPhone:unregisterPendingLoad(self, loadToken)
                     FarmShopPhone:onPendingLoadFinished()
                 end
             end
@@ -2812,8 +2812,14 @@ function FarmShopPhone:withChargeVerification(farmId, amount, chargeFn, onUnconf
     end
 
     local okAfter, balanceAfter = pcall(function() return farm:getBalance() end)
-    if okAfter and balanceAfter ~= balanceBefore then
-        return true, nil
+    local expected = amount or 0
+    if okAfter then
+        local delta = balanceBefore - balanceAfter
+        if math.abs(delta - expected) <= 0.01 then
+            return true, nil
+        end
+        print(string.format("[FarmShopPhone][Delivery] Баланс изменился на %.2f, ожидалось списание %.2f — проверяем позже.",
+            delta, expected))
     end
 
     FarmShopPhone.chargeVerifyPending = {
@@ -2897,12 +2903,17 @@ function FarmShopPhone:chargeUnpaidFee()
         return false, "no_mission"
     end
 
-    local chargedOk, chargeErr = self:withChargeVerification(farmId, fee, function()
+    local chargedOk, reason = self:withChargeVerification(farmId, fee, function()
         g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
     end, nil)
     if not chargedOk then
-        print("[FarmShopPhone][Delivery] ERROR списания прежнего долга: " .. tostring(chargeErr))
+        print("[FarmShopPhone][Delivery] ERROR списания прежнего долга: " .. tostring(reason))
         return false, "error"
+    end
+    if reason == "deferred" then
+        -- Баланс ещё не подтвердил списание: долг НЕ обнуляем, повторим при следующей проверке.
+        print("[FarmShopPhone][Delivery] Списание прежнего долга отложено; сумма сохранена.")
+        return true, "deferred"
     end
 
     print("[FarmShopPhone][Delivery] Ранее неоплаченная комиссия списана: " .. fee)
@@ -2931,6 +2942,15 @@ function FarmShopPhone:chargeCallFee()
     if g_currentMission == nil or farmId == nil then
         print("[FarmShopPhone][Order] Плата за звонок не списана: миссия/ферма недоступны.")
         return false, "no_mission"
+    end
+
+    local farm = g_farmManager ~= nil and g_farmManager:getFarmById(farmId) or nil
+    if farm ~= nil and farm.getBalance ~= nil then
+        local balance = farm:getBalance()
+        if balance < fee then
+            print(string.format("[FarmShopPhone][Order] Плата за звонок не списана: недостаточно средств (%.2f < %d).", balance, fee))
+            return false, "insufficient_funds"
+        end
     end
 
     local chargedOk, chargeErr = self:withChargeVerification(farmId, fee, function()
@@ -3007,7 +3027,11 @@ function FarmShopPhone:update(dt)
         pendingCharge.remaining = pendingCharge.remaining - dt
         if pendingCharge.remaining <= 0 then
             local okBalance, balanceNow = pcall(function() return pendingCharge.farm:getBalance() end)
-            if okBalance and balanceNow ~= pendingCharge.before then
+            local confirmed = false
+            if okBalance then
+                confirmed = math.abs((pendingCharge.before - balanceNow) - pendingCharge.amount) <= 0.01
+            end
+            if confirmed then
                 print(string.format("[FarmShopPhone][Delivery] Списание %s подтверждено при отложенной проверке.",
                     tostring(pendingCharge.amount)))
             else
