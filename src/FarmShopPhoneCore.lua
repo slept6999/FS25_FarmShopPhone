@@ -1,4 +1,4 @@
--- FarmShopPhoneCore.lua — модуль FS25 Farm Shop Phone.
+﻿-- FarmShopPhoneCore.lua — модуль FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone, не создаёт своё состояние заказа.
 
 local function getText(name)
@@ -96,7 +96,7 @@ function FarmShopPhone:cleanupDeliveryContext()
 end
 
 function FarmShopPhone:captureCallPosition()
-    self.callPosition = getPlayerPosition()
+    self.callPosition = FarmShopPhone:getPlayerPosition()
     if self.callPosition == nil then
         print("[FarmShopPhone] Cannot capture the order position: local player is unavailable.")
         return false

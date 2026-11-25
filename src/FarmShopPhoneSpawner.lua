@@ -1,4 +1,4 @@
--- FarmShopPhoneSpawner.lua — модуль FS25 Farm Shop Phone.
+﻿-- FarmShopPhoneSpawner.lua — модуль FS25 Farm Shop Phone.
 -- Использует общий объект FarmShopPhone, не создаёт своё состояние заказа.
 
 --- Высота рельефа в точке. Возвращает nil для невалидной координаты.
@@ -126,7 +126,7 @@ function FarmShopPhone:applyDeliverySpawnPlace(target)
             target.dirPerpX, target.dirPerpY, target.dirPerpZ
     end
 
-    local playerPos = getPlayerPosition()
+    local playerPos = FarmShopPhone:getPlayerPosition()
     if playerPos ~= nil then
         place.teleportX, place.teleportY, place.teleportZ = playerPos[1], playerPos[2], playerPos[3]
     end

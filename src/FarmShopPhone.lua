@@ -248,7 +248,7 @@ end
 
 --- Возвращает текущие мировые координаты локального игрока (x, y, z).
 -- @return таблица {x, y, z} или nil, если игрок недоступен.
-local function getPlayerPosition()
+function FarmShopPhone:getPlayerPosition()
     if g_localPlayer == nil or g_localPlayer.rootNode == nil then
         return nil
     end
