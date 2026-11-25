@@ -251,9 +251,8 @@ function FarmShopPhone:drawPhone()
             end
 
             local iconName = storeIconName(self.stores[i].kind)
-            -- У store_grey (64x64, глиф 36x36) глиф визуально мельче, чем у 48x48 иконок;
-            -- увеличиваем полотно, чтобы глифы были одного размера.
-            local iconSize = (iconName == "store_grey") and 0.022 * 64 / 48 or 0.022
+            -- Все иконки теперь в DDS 64x64 с одинаковым масштабом глифа.
+            local iconSize = 0.022
             if textured then
                 self:drawIconSquare(iconName, ui.listX + 0.008,
                     rowY + (ui.rowH - iconSize) * 0.5, iconSize)
@@ -295,7 +294,6 @@ function FarmShopPhone:drawPhone()
     local hasStore = #self.stores > 0
     local focusPickup = self.focusIndex == rowsShown + 1
     local focusDelivery = self.focusIndex == rowsShown + 2
-    local focusCall = self.focusIndex == rowsShown + 3
 
     -- Две одинаковые карточки в одну строку с симметричным зазором.
     local function drawCard(x, selected, hovered, pressed, focused, enabled)
@@ -390,11 +388,6 @@ function FarmShopPhone:drawPhone()
         drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 0.06, 0.07, 0.08, 0.55)
     elseif callHovered and not callActive then
         drawFilledRect(ui.buttonX, ui.buttonY, ui.buttonW, ui.buttonH, 1, 1, 1, 0.10)
-    end
-
-    if focusCall and callEnabled then
-        drawFilledRect(ui.buttonX + ui.buttonW - 0.005, ui.buttonY, 0.005, ui.buttonH,
-            0.72, 0.95, 0.29, 1)
     end
 
     -- Нижняя подсказка.
