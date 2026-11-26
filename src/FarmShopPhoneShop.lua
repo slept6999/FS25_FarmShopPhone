@@ -93,6 +93,19 @@ function FarmShopPhone:openShop()
     end
     self.orderStoreName = store.name
 
+    local canAffordCall, callFeeReason = self:canAffordCallFee()
+    if not canAffordCall then
+        if callFeeReason == "insufficient_funds" then
+            self:notifyDeliveryError("FSP_CALL_FEE_INSUFFICIENT")
+        else
+            self:notifyDeliveryError("FSP_CALL_UNAVAILABLE")
+        end
+        print("[FarmShopPhone][Order] Store was not opened: call fee unavailable (" ..
+            tostring(callFeeReason) .. ").")
+        self:setOrderState(FarmShopPhone.ORDER_STATE.CANCELLED)
+        return false
+    end
+
     local dbgSpec = store.placeable ~= nil and store.placeable.spec_vehicleBuyingStation or nil
     print(string.format("[FarmShopPhone][UI] Open requested: storeName=%s storeKind=%s storeMode=%s shopTrigger=%s vehicleBuyingStation=%s",
         tostring(store.name), tostring(store.kind), tostring(store.openMode),
@@ -199,7 +212,7 @@ function FarmShopPhone:openShop()
             store.placeable ~= nil and "yes" or "no", store.triggerObject ~= nil and "yes" or "no",
             moved, tostring(moved > 1.0)))
         -- Плата за звонок НЕ списывается: точку открыть не удалось («трубку не сняли»).
-        self:notifyOrderResult("delivery", FarmShopPhone:getText("FSP_STORE_OPEN_FAILED"))
+        self:notifyDeliveryError("FSP_STORE_OPEN_FAILED")
         self:abortOrder("shop_interface_unavailable")
         return false
     end

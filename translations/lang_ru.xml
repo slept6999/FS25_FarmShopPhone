@@ -26,6 +26,8 @@
         <text name="FSP_STORE_OPEN_FAILED" text="Не удалось открыть интерфейс выбранного магазина; заказ отменён" />
         <text name="FSP_DELIVERY_DONE" text="Доставка завершена. Товар размещён рядом с вами" />
         <text name="FSP_CALL_FEE" text="Плата за звонок" />
+        <text name="FSP_CALL_FEE_INSUFFICIENT" text="Недостаточно денег для звонка" />
+        <text name="FSP_CALL_UNAVAILABLE" text="Сейчас позвонить невозможно" />
         <text name="FSP_DELIVERY_PARTIAL" text="Доставка завершена частично: часть товара не удалось разместить" />
         <text name="FSP_DELIVERY_FEE_FAILED" text="Плата за доставку не списана, см. лог" />
         <text name="FSP_ORDER_PICKUP_DONE" text="Покупка оформлена. Заберите товар в магазине: %s" />

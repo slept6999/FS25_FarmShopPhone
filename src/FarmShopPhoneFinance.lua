@@ -2,10 +2,6 @@
 -- Модуль использует общий объект FarmShopPhone, не создаёт своё состояние.
 -- Загружается после src/FarmShopPhone.lua (там определены константы и состояние).
 
-local function getText(name)
-    return g_i18n:getText(name)
-end
-
 --- Рассчитывает комиссию за доставку от суммы покупок.
 function FarmShopPhone:computeDeliveryFee(total)
     local fee = math.floor((total or 0) * FarmShopPhone.deliveryRate + 0.5)
@@ -59,9 +55,43 @@ function FarmShopPhone:withChargeVerification(farmId, amount, chargeFn, onUnconf
     return true, "deferred"
 end
 
+--- Проверяет, может ли текущая ферма оплатить звонок.
+function FarmShopPhone:canAffordCallFee()
+    local farmId = nil
+    if g_currentMission ~= nil and g_currentMission.getFarmId ~= nil then
+        farmId = g_currentMission:getFarmId()
+    end
+    if g_currentMission == nil or farmId == nil then
+        return false, "no_mission"
+    end
+
+    local farm = g_farmManager ~= nil and g_farmManager:getFarmById(farmId) or nil
+    if farm == nil or farm.getBalance == nil then
+        return false, "balance_unavailable"
+    end
+
+    local okBalance, balance = pcall(farm.getBalance, farm)
+    if not okBalance or balance == nil then
+        return false, "balance_unavailable"
+    end
+    if balance < FarmShopPhone.CALL_FEE then
+        return false, "insufficient_funds", balance
+    end
+
+    return true, nil, nil
+end
+
+local function notifyDeliveryFeeFailure()
+    if g_currentMission ~= nil and g_currentMission.hud ~= nil then
+        g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
+            FarmShopPhone:getText("FSP_DELIVERY_FEE_FAILED"), nil,
+            GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
+    end
+end
+
 --- Списывает накопленную плату за доставку (2.5% от суммы покупок).
 -- Возвращает: charged(boolean), reason("charged" | "nothing_to_charge" | "not_confirmed" | "charge_error").
--- При ошибке списания сумма сохраняется в unpaidFee и будет списана позже.
+-- Ошибка видна игроку и в журнале, но скрытых долгов и повторных списаний нет.
 function FarmShopPhone:chargeDeliveryFee()
     if not FarmShopPhone.purchaseConfirmed then
         FarmShopPhone:logValidation("delivery fee not charged: purchase not confirmed by object creation")
@@ -82,21 +112,18 @@ function FarmShopPhone:chargeDeliveryFee()
 
     local farmId = FarmShopPhone.deliveryFarmId or (g_currentMission ~= nil and g_currentMission:getFarmId() or nil)
     if g_currentMission == nil or farmId == nil then
-        FarmShopPhone.unpaidFee = (FarmShopPhone.unpaidFee or 0) + fee
-        print("[FarmShopPhone][Delivery] WARNING: плата не списана (нет миссии/фермы), сумма сохранена как долг.")
+        print("[FarmShopPhone][Delivery] WARNING: плата не списана (нет миссии/фермы).")
         return false, "charge_error"
     end
 
     local chargedOk, chargeErr = self:withChargeVerification(farmId, fee, function()
         g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
     end, function()
-        FarmShopPhone.unpaidFee = (FarmShopPhone.unpaidFee or 0) + fee
-        FarmShopPhone.unpaidFeeFarmId = FarmShopPhone.unpaidFeeFarmId or farmId
+        print("[FarmShopPhone][Delivery] WARNING: плата за доставку не подтверждена; повторного списания не будет.")
+        notifyDeliveryFeeFailure()
     end)
     if not chargedOk then
-        FarmShopPhone.unpaidFee = (FarmShopPhone.unpaidFee or 0) + fee
-        FarmShopPhone.unpaidFeeFarmId = FarmShopPhone.unpaidFeeFarmId or farmId
-        print("[FarmShopPhone][Delivery] ERROR списания платы: " .. tostring(chargeErr) .. " — сумма сохранена как долг.")
+        print("[FarmShopPhone][Delivery] ERROR списания платы: " .. tostring(chargeErr))
         return false, "charge_error"
     end
 
@@ -112,43 +139,6 @@ function FarmShopPhone:chargeDeliveryFee()
     FarmShopPhone.deliveryFarmId = nil
     FarmShopPhone.purchaseConfirmed = false
     FarmShopPhone.pendingDelivery = false
-    return true, "charged"
-end
-
---- Пытается списать ранее неоплаченную комиссию (долг). Возвращает charged, reason.
-function FarmShopPhone:chargeUnpaidFee()
-    local fee = FarmShopPhone.unpaidFee or 0
-    if fee <= 0 then
-        return true, "none"
-    end
-
-    local farmId = FarmShopPhone.unpaidFeeFarmId
-        or (g_currentMission ~= nil and g_currentMission.getFarmId ~= nil and g_currentMission:getFarmId() or nil)
-    if g_currentMission == nil or farmId == nil then
-        return false, "no_mission"
-    end
-
-    local chargedOk, reason = self:withChargeVerification(farmId, fee, function()
-        g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
-    end, nil)
-    if not chargedOk then
-        print("[FarmShopPhone][Delivery] ERROR списания прежнего долга: " .. tostring(reason))
-        return false, "error"
-    end
-    if reason == "deferred" then
-        -- Баланс ещё не подтвердил списание: долг НЕ обнуляем, повторим при следующей проверке.
-        print("[FarmShopPhone][Delivery] Списание прежнего долга отложено; сумма сохранена.")
-        return true, "deferred"
-    end
-
-    print("[FarmShopPhone][Delivery] Ранее неоплаченная комиссия списана: " .. fee)
-    FarmShopPhone.unpaidFee = 0
-    FarmShopPhone.unpaidFeeFarmId = nil
-    if g_currentMission.hud ~= nil then
-        g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
-            string.format("%s: -%s", FarmShopPhone:getText("FSP_DELIVERY_FEE"), g_i18n:formatMoney(fee, 0, false, true)),
-            nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
-    end
     return true, "charged"
 end
 
@@ -169,19 +159,21 @@ function FarmShopPhone:chargeCallFee()
         return false, "no_mission"
     end
 
-    local farm = g_farmManager ~= nil and g_farmManager:getFarmById(farmId) or nil
-    if farm ~= nil and farm.getBalance ~= nil then
-        local balance = farm:getBalance()
-        if balance < fee then
-            print(string.format("[FarmShopPhone][Order] Плата за звонок не списана: недостаточно средств (%.2f < %d).", balance, fee))
-            return false, "insufficient_funds"
+    local canAfford, affordReason, balance = self:canAffordCallFee()
+    if not canAfford then
+        if affordReason == "insufficient_funds" then
+            print(string.format("[FarmShopPhone][Order] Плата за звонок не списана: недостаточно средств (%.2f < %d).",
+                balance or 0, fee))
+        else
+            print("[FarmShopPhone][Order] Плата за звонок не списана: миссия/ферма недоступны.")
         end
+        return false, affordReason
     end
 
     local chargedOk, chargeErr = self:withChargeVerification(farmId, fee, function()
         g_currentMission:addMoney(-fee, farmId, MoneyType.OTHER)
     end, function()
-        print("[FarmShopPhone][Order] WARNING: плата за звонок не подтверждена; повторная попытка при следующем вызове.")
+        print("[FarmShopPhone][Order] WARNING: плата за звонок не подтверждена; повторного списания не будет.")
     end)
     if not chargedOk then
         print("[FarmShopPhone][Order] ERROR списания платы за звонок: " .. tostring(chargeErr))

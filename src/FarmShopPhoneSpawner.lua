@@ -103,7 +103,7 @@ function FarmShopPhone:applyDeliverySpawnPlace(target)
         local safeTarget = self:findSafeDeliveryLocation(target[1], target[2], target[3], target, size)
         if safeTarget ~= nil then
             print("[FarmShopPhone] Found safe alternative delivery location")
-            self:showDeliverySuccess(FarmShopPhone:getText("FSP_DELIVERY_FALLBACK"))
+            self:showDeliverySuccess("FSP_DELIVERY_FALLBACK")
             target = safeTarget
         else
             return false

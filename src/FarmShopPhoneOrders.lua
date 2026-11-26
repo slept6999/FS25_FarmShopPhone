@@ -102,19 +102,23 @@ function FarmShopPhone:installPurchaseHooks()
     if self.purchaseHooksInstalled then
         return
     end
+    if Utils == nil or Utils.overwrittenFunction == nil then
+        print("[FarmShopPhone] WARNING: Utils.overwrittenFunction is unavailable; purchase confirmation is disabled.")
+        return
+    end
     self.purchaseHooksInstalled = true
 
     -- Транспорт и паллеты (паллеты тоже загружаются через VehicleLoadingData).
     if VehicleLoadingData ~= nil and VehicleLoadingData.load ~= nil
             and VehicleLoadingState ~= nil and VehicleLoadingState.OK ~= nil then
-        local originalLoad = VehicleLoadingData.load
         local vehicleOkState = VehicleLoadingState.OK
-        VehicleLoadingData.load = function(self, callback, callbackTarget, callbackArguments)
+        VehicleLoadingData.load = Utils.overwrittenFunction(VehicleLoadingData.load,
+                function(loadData, superFunc, callback, callbackTarget, callbackArguments)
             -- Связываем операцию загрузки с заказом, активным на момент её старта.
             local belongsToOrder = false
             local loadToken = FarmShopPhone.orderToken
             if FarmShopPhone.orderActive and not FarmShopPhone.orderSettled then
-                FarmShopPhone:registerPendingLoad(self)
+                FarmShopPhone:registerPendingLoad(loadData)
                 belongsToOrder = true
             end
 
@@ -130,25 +134,25 @@ function FarmShopPhone:installPurchaseHooks()
                     pcall(callback, cbTarget, objects, loadingState, cbArgs)
                 end
                 if belongsToOrder then
-                    FarmShopPhone:unregisterPendingLoad(self, loadToken)
+                    FarmShopPhone:unregisterPendingLoad(loadData, loadToken)
                     FarmShopPhone:onPendingLoadFinished()
                 end
             end
-            return originalLoad(self, wrapped, callbackTarget, callbackArguments)
-        end
+            return superFunc(loadData, wrapped, callbackTarget, callbackArguments)
+        end)
         print("[FarmShopPhone][Purchase] Hook installed: VehicleLoadingData.load")
     end
 
     -- Объекты (строения и производства).
     if PlaceableLoadingData ~= nil and PlaceableLoadingData.load ~= nil
             and PlaceableLoadingState ~= nil and PlaceableLoadingState.OK ~= nil then
-        local originalLoad = PlaceableLoadingData.load
         local placeableOkState = PlaceableLoadingState.OK
-        PlaceableLoadingData.load = function(self, callback, callbackTarget, callbackArguments)
+        PlaceableLoadingData.load = Utils.overwrittenFunction(PlaceableLoadingData.load,
+                function(loadData, superFunc, callback, callbackTarget, callbackArguments)
             local belongsToOrder = false
             local loadToken = FarmShopPhone.orderToken
             if FarmShopPhone.orderActive and not FarmShopPhone.orderSettled then
-                FarmShopPhone:registerPendingLoad(self)
+                FarmShopPhone:registerPendingLoad(loadData)
                 belongsToOrder = true
             end
 
@@ -179,12 +183,12 @@ function FarmShopPhone:installPurchaseHooks()
                     pcall(callback, cbTarget, result, loadingState, cbArgs)
                 end
                 if belongsToOrder then
-                    FarmShopPhone:unregisterPendingLoad(self, loadToken)
+                    FarmShopPhone:unregisterPendingLoad(loadData, loadToken)
                     FarmShopPhone:onPendingLoadFinished()
                 end
             end
-            return originalLoad(self, wrapped, callbackTarget, callbackArguments)
-        end
+            return superFunc(loadData, wrapped, callbackTarget, callbackArguments)
+        end)
         print("[FarmShopPhone][Purchase] Hook installed: PlaceableLoadingData.load")
     end
 
@@ -268,20 +272,15 @@ function FarmShopPhone:finalizeOrderSuccess()
     self.pendingWaitTimer = 0
 
     if self.fulfillment == "delivery" then
-        -- Сначала погашаем прежнюю неоплаченную комиссию (если она была).
-        local unpaidOk, unpaidResult = pcall(FarmShopPhone.chargeUnpaidFee, FarmShopPhone)
-        if not unpaidOk then
-            print("[FarmShopPhone][Delivery] Ошибка Lua при списании прежнего долга: " .. tostring(unpaidResult))
-        end
-
         -- Результат списания платы проверяем явно.
         local okCall, charged, reason = pcall(FarmShopPhone.chargeDeliveryFee, FarmShopPhone)
         if not okCall then
             print("[FarmShopPhone][Delivery] Ошибка Lua при списании платы: " .. tostring(charged))
-            self:notifyOrderResult("delivery", FarmShopPhone:getText("FSP_DELIVERY_FEE_FAILED"))
+            self:notifyOrderResult("delivery", "FSP_DELIVERY_FEE_FAILED")
         elseif charged == false then
-            print("[FarmShopPhone][Delivery] WARNING: плата за доставку не списана (" .. tostring(reason) .. "); сумма сохранена как долг.")
-            self:notifyOrderResult("delivery", FarmShopPhone:getText("FSP_DELIVERY_FEE_FAILED"))
+            print("[FarmShopPhone][Delivery] WARNING: плата за доставку не списана (" ..
+                tostring(reason) .. "); повторного списания не будет.")
+            self:notifyOrderResult("delivery", "FSP_DELIVERY_FEE_FAILED")
         else
             self:notifyOrderResult("delivery")
         end
@@ -509,9 +508,6 @@ function FarmShopPhone:update(dt)
     end
 
     -- Периодическая проверка доступности выбранных магазинов (каждые 5 секунд)
-    if self.storeAvailabilityTimer == nil then
-        self.storeAvailabilityTimer = 0
-    end
     self.storeAvailabilityTimer = self.storeAvailabilityTimer + dt
     if self.storeAvailabilityTimer > 5000 then  -- 5 seconds
         self.storeAvailabilityTimer = 0

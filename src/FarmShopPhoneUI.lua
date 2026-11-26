@@ -117,7 +117,8 @@ end
 --- Показывает уведомление об ошибке доставки.
 function FarmShopPhone:showDeliveryError(reason)
     if g_currentMission ~= nil and g_currentMission.hud ~= nil then
-        local text = FarmShopPhone:getText("FSP_DELIVERY_UNSAFE") .. " " .. localizeReason(reason)
+        local text = reason ~= nil and localizeReason(reason)
+            or FarmShopPhone:getText("FSP_DELIVERY_UNSAFE")
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_CRITICAL,
             text, nil, GuiSoundPlayer.SOUND_SAMPLES.ERROR)
     end
@@ -126,7 +127,7 @@ end
 --- Показывает уведомление об успешном выборе/размещении доставки.
 function FarmShopPhone:showDeliverySuccess(key)
     if g_currentMission ~= nil and g_currentMission.hud ~= nil then
-        local text = FarmShopPhone:getText(key)
+        local text = localizeReason(key)
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
             text, nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
     end

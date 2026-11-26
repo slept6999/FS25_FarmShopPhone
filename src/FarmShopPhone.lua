@@ -1,7 +1,7 @@
-﻿-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 -- FarmShopPhone — фермерский телефон для FS25 (Farm Shop Phone for FS25)
 --
--- Version: 0.2.6.4
+-- Version: 0.2.6.6
 --
 -- Назначение: через телефонный оверлей звонить на торговые точки карты,
 -- открывать стандартный каталог магазина, выбирать самовывоз или разовую
@@ -28,7 +28,7 @@
 --      переносятся в безопасную точку рядом с игроком (централизованный
 --      beginSpawnOverride/apply/restore). Заказ завершается успехом только после
 --      завершения ВСЕХ его загрузок; плата 2.5% списывается при успешном
---      завершении, а при выгрузке карты — сохраняется как долг.
+--      завершении; при выгрузке карты отложенные платежи не создаются.
 --
 -- Ограничения: каталог остаётся общим (ассортимент не фильтруется по точке);
 -- размещение подтверждается реальным созданием объекта через хуки
@@ -89,14 +89,15 @@ FarmShopPhone.DELIVERY_SAFETY = {
 FarmShopPhone.MOD_DIRECTORY = g_currentModDirectory or ''
 
 
--- Перехватываем создание стандартных торговых точек-триггеров (ShopTrigger),
--- чтобы включать их в список телефона как магазины со стандартным каталогом.
-if ShopTrigger ~= nil and ShopTrigger.new ~= nil and not FarmShopPhone.shopTriggerInterceptorInstalled then
+-- Перехват устанавливается до загрузки карты: ShopTrigger создаются раньше loadMap().
+-- overwrittenFunction сохраняет цепочку совместимости с другими модами.
+if ShopTrigger ~= nil and ShopTrigger.new ~= nil and Utils ~= nil
+        and Utils.overwrittenFunction ~= nil
+        and not FarmShopPhone.shopTriggerInterceptorInstalled then
     FarmShopPhone.shopTriggerInterceptorInstalled = true
 
-    local originalShopTriggerNew = ShopTrigger.new
-    ShopTrigger.new = function(node)
-        local instance = originalShopTriggerNew(node)
+    ShopTrigger.new = Utils.overwrittenFunction(ShopTrigger.new, function(node, superFunc)
+        local instance = superFunc(node)
 
         if instance ~= nil then
             FarmShopPhone.shopTriggers = FarmShopPhone.shopTriggers or {}
@@ -104,7 +105,7 @@ if ShopTrigger ~= nil and ShopTrigger.new ~= nil and not FarmShopPhone.shopTrigg
         end
 
         return instance
-    end
+    end)
 end
 
 -- Состояние инициализации и жизни мода.
@@ -194,15 +195,12 @@ FarmShopPhone.deliveryFailure = nil     -- причина неудачи раз�
 FarmShopPhone.deliveryPartial = false   -- часть товара не удалось разместить
 FarmShopPhone.lastRestoreConflict = false
 
--- Непогашенная плата (если списание не удалось): сохраняется до следующей попытки.
-FarmShopPhone.unpaidFee = 0
-FarmShopPhone.unpaidFeeFarmId = nil
-
 -- Плата за телефонный звонок (открытие магазина через телефон).
 FarmShopPhone.CALL_FEE = 10
 
 -- История нажатий клавиш для определения одиночных нажатий ( edge detection ).
 FarmShopPhone.keyStates = {}
+FarmShopPhone.storeAvailabilityTimer = 0
 
 -- Состояния интерактивных элементов (ТЗ §3, §4).
 FarmShopPhone.focusIndex = 0     -- индекс элемента в фокусе (0 — фокуса нет)
@@ -263,6 +261,7 @@ function FarmShopPhone:loadMap()
     self.deliveryApplied = false
     self.deliveryTotalCharges = 0
     self.deliveryFarmId = nil
+    self.storeAvailabilityTimer = 0
     self:loadUiAssets()
     self:installFinanceHook()
     self:installPurchaseHooks()
@@ -284,20 +283,10 @@ function FarmShopPhone:deleteMap()
     FarmShopPhone.shopTriggers = {}
 
     -- Возвращаем места спавна и безопасно завершаем незавершённый заказ.
-    -- Выгрузка карты сама по себе НЕ инициирует списание комиссии.
+    -- Выгрузка карты не инициирует списание и не создаёт отложенных платежей.
     self.restoreTimer = 0
     self.pendingWaitTimer = 0
     self:restoreSpawnPlaces()
-    if FarmShopPhone.purchaseConfirmed and self.fulfillment == "delivery" and self.deliveryFailure == nil then
-    -- Заказ фактически успешен, но списывать при выгрузке нельзя: сохраняем долг,
-    -- он будет погашен при следующем успешном заказе (chargeUnpaidFee).
-        local total = self.evidenceSpent or 0
-        local fee = self:computeDeliveryFee(total)
-        if fee > 0 then
-            FarmShopPhone.unpaidFee = (FarmShopPhone.unpaidFee or 0) + fee
-            print("[FarmShopPhone][Delivery] Комиссия не списана при выгрузке; сохранена как долг: " .. fee)
-        end
-    end
     self:resetOrderContext()
 
     -- Разблокируем движение при выгрузке карты
