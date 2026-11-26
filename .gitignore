@@ -23,3 +23,7 @@ __pycache__/
 
 # Сборочный архив мода (публикуется через Releases, не в репозитории)
 FS25_FarmShopPhone.zip
+
+
+# PNG исходники текстур (мод использует DDS)
+ui/textures/*.png
