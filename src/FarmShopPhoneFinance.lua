@@ -47,10 +47,10 @@ function FarmShopPhone:withChargeVerification(farmId, amount, chargeFn, onUnconf
         farm = farm,
         amount = amount,
         before = balanceBefore,
-        remaining = 1000,
+        remaining = 3000,  -- 3 секунды вместо 1
         onUnconfirmed = onUnconfirmed
     }
-    print(string.format("[FarmShopPhone][Delivery] Списание %s не подтверждено сразу — отложенная проверка.",
+    print(string.format("[FarmShopPhone][Delivery] Списание %s не подтверждено сразу — отложенная проверка (3 с).",
         tostring(amount)))
     return true, "deferred"
 end
@@ -127,6 +127,12 @@ function FarmShopPhone:chargeDeliveryFee()
         return false, "charge_error"
     end
 
+    -- Note: if deferred, notification and cleanup will happen in deferred check
+    if chargeErr == "deferred" then
+        print(string.format("[FarmShopPhone][Delivery] Delivery fee %d pending verification (purchases %.2f)", fee, total))
+        return true, "deferred"
+    end
+
     local text = string.format("%s: -%s", FarmShopPhone:getText("FSP_DELIVERY_FEE"), g_i18n:formatMoney(fee, 0, false, true))
     if g_currentMission.hud ~= nil then
         g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO, text, nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
@@ -178,6 +184,12 @@ function FarmShopPhone:chargeCallFee()
     if not chargedOk then
         print("[FarmShopPhone][Order] ERROR списания платы за звонок: " .. tostring(chargeErr))
         return false, "error"
+    end
+
+    -- Note: if deferred, notification and callFeeCharged will be set in deferred check
+    if chargeErr == "deferred" then
+        print("[FarmShopPhone][Order] Плата за звонок " .. fee .. " pending verification")
+        return true, "deferred"
     end
 
     self.callFeeCharged = true

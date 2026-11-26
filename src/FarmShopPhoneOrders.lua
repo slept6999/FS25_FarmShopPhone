@@ -465,9 +465,34 @@ function FarmShopPhone:update(dt)
             if confirmed then
                 print(string.format("[FarmShopPhone][Delivery] Списание %s подтверждено при отложенной проверке.",
                     tostring(pendingCharge.amount)))
+                -- Show notification and clean up if this was a delivery fee or call fee
+                local fee = pendingCharge.amount
+                if g_currentMission.hud ~= nil then
+                    if fee == FarmShopPhone.CALL_FEE and not FarmShopPhone.callFeeCharged then
+                        FarmShopPhone.callFeeCharged = true
+                        g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
+                            string.format("%s: -%s", FarmShopPhone:getText("FSP_CALL_FEE"), g_i18n:formatMoney(fee, 0, false, true)),
+                            nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
+                    elseif fee > FarmShopPhone.CALL_FEE and FarmShopPhone.evidenceSpent > 0 then
+                        g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_INFO,
+                            string.format("%s: -%s", FarmShopPhone:getText("FSP_DELIVERY_FEE"), g_i18n:formatMoney(fee, 0, false, true)),
+                            nil, GuiSoundPlayer.SOUND_SAMPLES.NOTIFICATION)
+                        FarmShopPhone.evidenceSpent = 0
+                        FarmShopPhone.deliveryTotalCharges = 0
+                        FarmShopPhone.deliveryFarmId = nil
+                        FarmShopPhone.purchaseConfirmed = false
+                        FarmShopPhone.pendingDelivery = false
+                    end
+                end
             else
-                print(string.format("[FarmShopPhone][Delivery] WARNING: списание %s так и не подтвердилось.",
+                print(string.format("[FarmShopPhone][Delivery] ERROR: списание %s НЕ подтвердилось за 3 с — деньги не списались.",
                     tostring(pendingCharge.amount)))
+                -- CRITICAL notification visible to player
+                if g_currentMission ~= nil and g_currentMission.hud ~= nil then
+                    g_currentMission.hud:addSideNotification(FSBaseMission.INGAME_NOTIFICATION_CRITICAL,
+                        FarmShopPhone:getText("FSP_DELIVERY_FEE_FAILED") .. " — списание не подтвердилось",
+                        nil, GuiSoundPlayer.SOUND_SAMPLES.ERROR)
+                end
                 if pendingCharge.onUnconfirmed ~= nil then
                     pcall(pendingCharge.onUnconfirmed)
                 end
